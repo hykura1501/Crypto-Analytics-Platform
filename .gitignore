@@ -1,0 +1,378 @@
+# ============================================
+# Crypto Analytics Platform - .gitignore
+# ============================================
+
+# ============================================
+# Go (Backend)
+# ============================================
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# Go build output
+backend/main
+backend/**/main
+backend/**/*.exe
+backend/**/*.dll
+backend/**/*.so
+backend/**/*.dylib
+
+# Go vendor (if using)
+vendor/
+
+# ============================================
+# Python (Services: crawler, ai-service)
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+services/**/venv/
+services/**/env/
+services/**/.venv/
+
+# Python cache
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ============================================
+# Node.js (Frontend)
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build outputs
+dist/
+dist-ssr/
+*.local
+build/
+.vite/
+
+# Frontend specific
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/node_modules/
+
+# Package managers (keep lock files for consistency)
+# Uncomment if you want to ignore lock files
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# ============================================
+# Environment & Configuration
+# ============================================
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# Environment files in subdirectories
+backend/.env
+frontend/.env
+services/**/.env
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+
+# PostgreSQL dumps (keep migration files)
+*.sql
+*.dump
+# Keep migration directories and files
+!**/migrations/
+!**/migrations/*.sql
+
+# ============================================
+# Docker
+# ============================================
+.dockerignore
+
+# Docker volumes (if mounted locally)
+docker-data/
+postgres_data/
+redis_data/
+
+# Docker compose override files (may contain secrets)
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ============================================
+# IDE & Editors
+# ============================================
+# VSCode
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+.netrwhist
+
+# Emacs
+*~
+\#*\#
+.\#*
+*~
+*.elc
+auto-save-list
+tramp
+
+# ============================================
+# OS Files
+# ============================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+.nfs*
+
+# ============================================
+# Logs
+# ============================================
+*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Application logs
+backend/logs/
+frontend/logs/
+services/**/logs/
+
+# ============================================
+# Temporary Files
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+
+# ============================================
+# Cache
+# ============================================
+.cache/
+*.cache
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# TypeScript
+*.tsbuildinfo
+
+# ============================================
+# Testing
+# ============================================
+# Coverage
+coverage/
+*.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.hypothesis/
+
+# ============================================
+# Build Artifacts
+# ============================================
+# Compiled binaries
+*.exe
+*.out
+*.app
+
+# Archive files
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# ============================================
+# AI/ML Models (if storing locally)
+# ============================================
+*.h5
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+*.pb
+
+# ============================================
+# Data files (if storing locally)
+# ============================================
+*.csv
+*.json.bak
+data/
+datasets/
+!services/**/sample_data/
+
+# ============================================
+# SSL Certificates (if any)
+# ============================================
+*.pem
+*.key
+*.crt
+*.cert
+*.ca-bundle
+
+# ============================================
+# Secrets & Keys
+# ============================================
+secrets/
+*.secret
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+*.pub
+
+# ============================================
+# Project Specific
+# ============================================
+# Migration backups (if any)
+backend/migrations/*.backup
+
+# Crawler temporary files
+services/crawler/temp/
+services/crawler/cache/
+
+# AI service models (if downloading)
+services/ai-service/models/
+services/ai-service/downloads/
+
+# Frontend build artifacts
+frontend/.next/
+frontend/out/
+
+# ============================================
+# Keep important files
+# ============================================
+!.gitignore
+!.dockerignore
+!README.md
+!*.md
+!docker-compose.yml
+!docker-compose.dev.yml
+!**/.env.example
