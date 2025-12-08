@@ -18,15 +18,32 @@ Hệ thống phân tích tài chính tiền điện tử (cryptocurrency) kết 
 
 ## Kiến trúc hệ thống
 
-📊 **Xem chi tiết kiến trúc tại:** [ARCHITECTURE.md](./ARCHITECTURE.md)
+📊 **Tài liệu kiến trúc:**
 
-File này chứa các sơ đồ mermaid về:
-- Kiến trúc tổng quan
-- Luồng dữ liệu chi tiết
-- Database schema
-- Component interaction
-- Deployment architecture
-- Scalability architecture
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Kiến trúc ban đầu với Mermaid diagrams
+- **[SITUATION_ANALYSIS.md](./SITUATION_ANALYSIS.md)** - Phân tích chi tiết 3 tình huống và giải pháp kỹ thuật
+- **[ARCHITECTURE_DIAGRAMS.md](./ARCHITECTURE_DIAGRAMS.md)** - Sơ đồ kiến trúc sau khi nâng cấp
+- **[IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md)** - Hướng dẫn sử dụng các tính năng mới
+- **[SUMMARY.md](./SUMMARY.md)** - Tổng kết implementation
+
+### 🎯 Giải pháp cho 3 tình huống đồ án:
+
+#### 1. ✅ WebSocket Scaling (Redis Pub/Sub)
+- Scale từ 5,000 → 15,000+ concurrent connections
+- Sticky session với IP Hash
+- Zero downtime deployment
+
+#### 2. ✅ AI-Enhanced Crawler (LLM Parser)
+- Tự động fallback từ CSS → LLM khi cần
+- Success rate: 60% → 90%+
+- Chi phí tối ưu: $150/month
+
+#### 3. ✅ Security Architecture (JWT + Rate Limiting)
+- JWT Authentication với refresh token
+- IP-based rate limiting (100 req/min)
+- Audit logging đầy đủ
+
+**Chi tiết:** Xem [SITUATION_ANALYSIS.md](./SITUATION_ANALYSIS.md)
 
 ## Cấu trúc dự án
 

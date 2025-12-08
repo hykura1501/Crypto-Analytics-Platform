@@ -1,12 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hykura1501/crypto-analytics-backend/internal/database"
 	"github.com/hykura1501/crypto-analytics-backend/internal/handlers"
+	"github.com/hykura1501/crypto-analytics-backend/internal/middleware"
+	"github.com/hykura1501/crypto-analytics-backend/internal/services"
 	"github.com/hykura1501/crypto-analytics-backend/internal/websocket"
 	"github.com/joho/godotenv"
 )
@@ -31,8 +34,20 @@ func main() {
 	hub := websocket.NewHub()
 	go hub.Run()
 
+	// Start price updater service
+	tradingPairs := getActiveTradingPairs(db)
+	binanceService := services.NewBinanceService()
+	priceUpdater := services.NewPriceUpdater(binanceService, redisClient, hub, tradingPairs)
+	go priceUpdater.Start()
+
 	// Setup Gin router
 	r := gin.Default()
+
+	// Global middleware
+	r.Use(middleware.SecurityHeaders())
+	r.Use(middleware.RequestIDMiddleware())
+	r.Use(middleware.AuditLogger())
+	r.Use(middleware.IPRateLimiter(redisClient, 100)) // 100 requests per minute per IP
 
 	// CORS middleware
 	r.Use(func(c *gin.Context) {
@@ -55,33 +70,58 @@ func main() {
 	// API routes
 	api := r.Group("/api/v1")
 	{
-		// Trading pairs
-		api.GET("/pairs", h.GetTradingPairs)
-		api.GET("/pairs/:pair", h.GetPairInfo)
+		// Public endpoints (no auth required)
+		public := api.Group("")
+		{
+			// Trading pairs
+			public.GET("/pairs", h.GetTradingPairs)
+			public.GET("/pairs/:pair", h.GetPairInfo)
 
-		// Price data
-		api.GET("/price/:pair", h.GetCurrentPrice)
-		api.GET("/price/:pair/history", h.GetPriceHistory)
-		api.GET("/klines/:pair", h.GetKlines)
+			// Price data
+			public.GET("/price/:pair", h.GetCurrentPrice)
+			public.GET("/price/:pair/history", h.GetPriceHistory)
+			public.GET("/klines/:pair", h.GetKlines)
 
-		// News
-		api.GET("/news", h.GetNews)
-		api.GET("/news/:id", h.GetNewsDetail)
-		api.GET("/news/sources", h.GetNewsSources)
+			// News
+			public.GET("/news", h.GetNews)
+			public.GET("/news/:id", h.GetNewsDetail)
+			public.GET("/news/sources", h.GetNewsSources)
 
-		// AI Analysis
-		api.GET("/analysis/:pair", h.GetAnalysis)
-		api.POST("/analysis/predict", h.PredictTrend)
+			// AI Analysis (read-only)
+			public.GET("/analysis/:pair", h.GetAnalysis)
+		}
 
-		// Account management
-		api.POST("/auth/register", h.Register)
-		api.POST("/auth/login", h.Login)
-		api.GET("/account/profile", h.GetProfile)
-		api.PUT("/account/profile", h.UpdateProfile)
-		api.GET("/account/watchlist", h.GetWatchlist)
-		api.POST("/account/watchlist", h.AddToWatchlist)
-		api.DELETE("/account/watchlist/:pair", h.RemoveFromWatchlist)
+		// Auth endpoints
+		auth := api.Group("/auth")
+		{
+			auth.POST("/register", h.Register)
+			auth.POST("/login", h.Login)
+			auth.POST("/refresh", h.RefreshToken)
+		}
+
+		// Protected endpoints (require authentication)
+		protected := api.Group("")
+		protected.Use(middleware.AuthMiddleware())
+		{
+			// AI Analysis (create)
+			protected.POST("/analysis/predict", h.PredictTrend)
+
+			// Account management
+			protected.GET("/account/profile", h.GetProfile)
+			protected.PUT("/account/profile", h.UpdateProfile)
+			protected.GET("/account/watchlist", h.GetWatchlist)
+			protected.POST("/account/watchlist", h.AddToWatchlist)
+			protected.DELETE("/account/watchlist/:pair", h.RemoveFromWatchlist)
+		}
 	}
+
+	// Health check endpoint
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status":      "healthy",
+			"connections": hub.GetTotalConnections(),
+		})
+	})
 
 	// WebSocket endpoint
 	r.GET("/ws/price/:pair", h.HandleWebSocket)
@@ -92,7 +132,32 @@ func main() {
 	}
 
 	log.Printf("Server starting on port %s", port)
+	log.Printf("Monitoring %d trading pairs", len(tradingPairs))
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
+}
+
+// getActiveTradingPairs retrieves active trading pairs from database
+func getActiveTradingPairs(db *sql.DB) []string {
+	rows, err := db.Query("SELECT symbol FROM trading_pairs WHERE status = 'active'")
+	if err != nil {
+		log.Printf("Error fetching trading pairs: %v", err)
+		return []string{"BTCUSDT", "ETHUSDT"} // Default pairs
+	}
+	defer rows.Close()
+
+	var pairs []string
+	for rows.Next() {
+		var symbol string
+		if err := rows.Scan(&symbol); err == nil {
+			pairs = append(pairs, symbol)
+		}
+	}
+
+	if len(pairs) == 0 {
+		return []string{"BTCUSDT", "ETHUSDT"} // Default pairs
+	}
+
+	return pairs
 }

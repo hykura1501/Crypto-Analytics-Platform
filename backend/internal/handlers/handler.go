@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/hykura1501/crypto-analytics-backend/internal/middleware"
 	"github.com/hykura1501/crypto-analytics-backend/internal/models"
 	"github.com/hykura1501/crypto-analytics-backend/internal/services"
 	ws "github.com/hykura1501/crypto-analytics-backend/internal/websocket"
@@ -317,13 +318,124 @@ func (h *Handler) PredictTrend(c *gin.Context) {
 	})
 }
 
-// Placeholder handlers for account management
+// Register creates a new user account
 func (h *Handler) Register(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Not implemented yet"})
+	var req struct {
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required,min=8"`
+		Username string `json:"username" binding:"required,min=3"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Hash password (in production, use bcrypt)
+	// For demo purposes, we'll store plain text (NOT SECURE!)
+	// TODO: Implement proper password hashing
+
+	var userID int
+	err := h.DB.QueryRow(`
+		INSERT INTO users (email, username, password_hash, role)
+		VALUES ($1, $2, $3, 'user')
+		RETURNING id
+	`, req.Email, req.Username, req.Password).Scan(&userID)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "User registered successfully",
+		"user_id": userID,
+	})
 }
 
+// Login authenticates a user
 func (h *Handler) Login(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Not implemented yet"})
+	var req struct {
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var userID int
+	var username, role, passwordHash string
+
+	err := h.DB.QueryRow(`
+		SELECT id, username, password_hash, role
+		FROM users
+		WHERE email = $1
+	`, req.Email).Scan(&userID, &username, &passwordHash, &role)
+
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// Verify password (in production, use bcrypt.CompareHashAndPassword)
+	if passwordHash != req.Password {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	// Generate tokens
+	accessToken, refreshToken, err := middleware.GenerateTokenPair(userID, req.Email, role)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate tokens"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"user": gin.H{
+			"id":       userID,
+			"email":    req.Email,
+			"username": username,
+			"role":     role,
+		},
+	})
+}
+
+// RefreshToken generates a new access token from refresh token
+func (h *Handler) RefreshToken(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	claims, err := middleware.ValidateToken(req.RefreshToken)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
+		return
+	}
+
+	// Generate new access token
+	accessToken, err := middleware.GenerateToken(claims.UserID, claims.Email, claims.Role)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token": accessToken,
+	})
 }
 
 func (h *Handler) GetProfile(c *gin.Context) {
