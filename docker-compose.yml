@@ -181,6 +181,31 @@ services:
       - crypto-network
     restart: unless-stopped
 
+  # AI Service (Sentiment Analysis)
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    container_name: crypto_ai_service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: crypto_db
+
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: news_new_article
+      KAFKA_GROUP_ID: ai-service-group
+    networks:
+      - crypto-network
+    restart: unless-stopped
+
 networks:
   crypto-network:
     driver: bridge
