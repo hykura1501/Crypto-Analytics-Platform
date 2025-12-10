@@ -142,6 +142,45 @@ services:
       - crypto-network
     restart: unless-stopped
 
+  # Crawler Service
+  crawler-service:
+    build:
+      context: ./services/crawler-service
+      dockerfile: Dockerfile
+    container_name: crypto_crawler_service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: crypto_db
+
+      # Kafka
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: news_new_article
+
+      # RSS Feed URLs
+      COINDESK_RSS_URL: https://www.coindesk.com/arc/outboundfeeds/rss/
+      COINTELEGRAPH_RSS_URL: https://cointelegraph.com/rss
+
+      # Crawler Settings
+      CRAWL_INTERVAL_MINUTES: 10
+      MAX_ARTICLES_PER_RUN: 20
+
+      # Server
+      SERVER_PORT: 8083
+    ports:
+      - "8083:8083"
+    networks:
+      - crypto-network
+    restart: unless-stopped
+
 networks:
   crypto-network:
     driver: bridge
