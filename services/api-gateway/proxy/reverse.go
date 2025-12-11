@@ -18,6 +18,18 @@ func ReverseProxy(targetURL string) gin.HandlerFunc {
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
+	// Modify response to remove CORS headers from backend
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		// Remove CORS headers that backend might have set
+		resp.Header.Del("Access-Control-Allow-Origin")
+		resp.Header.Del("Access-Control-Allow-Credentials")
+		resp.Header.Del("Access-Control-Allow-Methods")
+		resp.Header.Del("Access-Control-Allow-Headers")
+		resp.Header.Del("Access-Control-Expose-Headers")
+		resp.Header.Del("Access-Control-Max-Age")
+		return nil
+	}
+
 	// Custom error handler
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Printf("Proxy error: %v", err)

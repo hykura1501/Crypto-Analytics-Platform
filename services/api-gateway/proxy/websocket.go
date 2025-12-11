@@ -23,23 +23,40 @@ func WebSocketProxy(targetURL string) gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
+		log.Printf("WebSocketProxy: Received request for path=%s, method=%s", c.Request.URL.Path, c.Request.Method)
+		log.Printf("WebSocketProxy: Headers - Upgrade=%s, Connection=%s, Origin=%s", c.GetHeader("Upgrade"), c.GetHeader("Connection"), c.GetHeader("Origin"))
+
+		// Set CORS headers before upgrade
+		origin := c.GetHeader("Origin")
+		if origin != "" {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
 		// Upgrade HTTP connection to WebSocket
 		clientConn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			log.Printf("Failed to upgrade WebSocket: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to upgrade connection"})
 			return
 		}
+		log.Printf("WebSocketProxy: Successfully upgraded connection")
 		defer clientConn.Close()
 
 		// Connect to target WebSocket server
-		targetWsURL := "ws://" + target.Host + c.Request.URL.Path
+		// Use the original path from the request
+		targetPath := c.Request.URL.Path
+		targetWsURL := "ws://" + target.Host + targetPath
+		log.Printf("WebSocketProxy: Connecting to target: %s", targetWsURL)
 
 		targetConn, _, err := websocket.DefaultDialer.Dial(targetWsURL, nil)
 		if err != nil {
 			log.Printf("Failed to connect to target WebSocket: %v", err)
+			clientConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Failed to connect to backend"))
 			return
 		}
 		defer targetConn.Close()
+		log.Printf("WebSocketProxy: Connected to target WebSocket")
 
 		// Bidirectional proxy
 		done := make(chan struct{}, 2)
@@ -74,5 +91,6 @@ func WebSocketProxy(targetURL string) gin.HandlerFunc {
 
 		// Wait for either direction to close
 		<-done
+		log.Printf("WebSocketProxy: Connection closed")
 	}
 }

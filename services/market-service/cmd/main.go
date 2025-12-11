@@ -106,7 +106,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	dsn := cfg.Database.DSN()
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Silent), // Tắt GORM logging
 	})
 
 	if err != nil {

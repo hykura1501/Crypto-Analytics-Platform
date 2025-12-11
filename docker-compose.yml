@@ -64,6 +64,32 @@ services:
       retries: 10
       start_period: 40s
 
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: crypto_api_gateway
+    depends_on:
+      auth-service:
+        condition: service_started
+      market-service:
+        condition: service_started
+      crawler-service:
+        condition: service_started
+    environment:
+      PORT: "8080"
+      JWT_SECRET: your-super-secret-jwt-key-change-this-in-production
+      AUTH_SERVICE_URL: http://auth-service:8081
+      MARKET_SERVICE_URL: http://market-service:8082
+      CRAWLER_SERVICE_URL: http://crawler-service:8083
+      ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
+    ports:
+      - "8080:8080"
+    networks:
+      - crypto-network
+    restart: unless-stopped
+
   # Auth Service
   auth-service:
     build:
