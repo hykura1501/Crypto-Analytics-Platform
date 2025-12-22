@@ -27,6 +27,10 @@ class EnhancedNewsCrawler:
             rss_url = source_config.get("rss_url")
             logger.info(f"Fetching RSS feed from {source_name}: {rss_url}")
             
+            # Set custom User-Agent for feedparser (RSS feeds should be accessible)
+            import feedparser
+            feedparser.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            
             feed = feedparser.parse(rss_url)
             
             articles = []
@@ -62,7 +66,10 @@ class EnhancedNewsCrawler:
     def _extract_with_newspaper(self, url: str) -> Optional[Dict]:
         """Extract using newspaper3k (fast, for static pages)"""
         try:
+            # Set User-Agent for newspaper3k
+            import newspaper
             article = NewspaperArticle(url)
+            article.config.browser_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             article.download()
             article.parse()
             
@@ -152,12 +159,16 @@ class EnhancedNewsCrawler:
             # Get articles from RSS feed
             rss_articles = self.parse_rss_feed(source_name, source_config)
             
-            for rss_article in rss_articles:
+            logger.info(f"Processing {len(rss_articles)} articles from {source_name}")
+            
+            for idx, rss_article in enumerate(rss_articles, 1):
                 url = rss_article["url"]
                 
                 try:
-                    # Check robots.txt
-                    if not robots_checker.can_fetch(url):
+                    logger.info(f"[{idx}/{len(rss_articles)}] Processing {source_name}: {url[:80]}...")
+                    
+                    # Check robots.txt (skip for RSS feed domains - RSS feeds are public)
+                    if not robots_checker.can_fetch(url, skip_for_rss=True):
                         logger.info(f"Skipping (robots.txt): {url}")
                         continue
                     
@@ -168,8 +179,18 @@ class EnhancedNewsCrawler:
                     requires_js = source_config.get("requires_js", False)
                     extracted = self.extract_article_content(url, requires_js=requires_js)
                     if not extracted or not extracted.get("content_text"):
-                        logger.warning(f"Failed to extract content: {url}")
-                        continue
+                        logger.warning(f"Failed to extract content from {source_name}: {url}")
+                        # Try fallback: if Playwright failed, try newspaper3k
+                        if requires_js:
+                            logger.info(f"Trying newspaper3k fallback for {url}")
+                            extracted = self._extract_with_newspaper(url)
+                            if not extracted or not extracted.get("content_text"):
+                                logger.warning(f"Fallback also failed: {url}")
+                                continue
+                        else:
+                            continue
+                    
+                    logger.debug(f"Successfully extracted content from {source_name}: {len(extracted.get('content_text', ''))} chars")
                     
                     # Combine data
                     title = extracted.get("title") or rss_article.get("title")

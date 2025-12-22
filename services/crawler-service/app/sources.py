@@ -13,7 +13,7 @@ SOURCES = {
         "type": "rss",
         "rss_url": "https://cointelegraph.com/rss",
         "language": "en",
-        "requires_js": True  # May need Playwright for full content
+        "requires_js": False  # Try newspaper3k first, Playwright can be slow
     },
     "VNExpress": {
         "type": "rss",
