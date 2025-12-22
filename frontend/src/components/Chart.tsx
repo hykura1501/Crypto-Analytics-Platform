@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
-import { createChart, type IChartApi, type ISeriesApi, type CandlestickData, type Time, type SeriesMarker, CandlestickSeries, createSeriesMarkers, type ISeriesMarkersPluginApi } from 'lightweight-charts';
-import { apiClient } from '../api/client';
-import { type MarketPrice } from '../types';
-import { WS_BASE_URL } from '../config';
+import { useEffect, useRef, useState } from "react";
+import {
+  createChart,
+  type IChartApi,
+  type ISeriesApi,
+  type CandlestickData,
+  type Time,
+  type SeriesMarker,
+  CandlestickSeries,
+  createSeriesMarkers,
+  type ISeriesMarkersPluginApi,
+} from "lightweight-charts";
+import { apiClient } from "../api/client";
+import { type MarketPrice } from "../types";
+import { WS_BASE_URL } from "../config";
 
 interface ChartProps {
   symbol?: string;
@@ -10,10 +20,14 @@ interface ChartProps {
   selectedNewsTime?: number | null;
 }
 
-export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNewsTime }: ChartProps) {
+export default function Chart({
+  symbol = "BTCUSDT",
+  interval = "1h",
+  selectedNewsTime,
+}: ChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -33,18 +47,21 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
         limit: 100,
       });
 
-      const formattedData: CandlestickData<Time>[] = response.data.map((price: MarketPrice) => ({
-        time: (new Date(price.time).getTime() / 1000) as Time,
-        open: price.open,
-        high: price.high,
-        low: price.low,
-        close: price.close,
-      }));
+      const formattedData: CandlestickData<Time>[] = response.data.map(
+        (price: MarketPrice) => ({
+          time: (new Date(price.time).getTime() / 1000) as Time,
+          open: price.open,
+          high: price.high,
+          low: price.low,
+          close: price.close,
+        })
+      );
 
       candlestickSeriesRef.current.setData(formattedData);
       setIsLoading(false);
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load chart data';
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to load chart data";
       const apiError = err as { response?: { data?: { message?: string } } };
       setError(apiError.response?.data?.message || errorMessage);
       setIsLoading(false);
@@ -60,12 +77,12 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
       layout: {
-        background: { color: '#ffffff' },
-        textColor: '#333',
+        background: { color: "#ffffff" },
+        textColor: "#333",
       },
       grid: {
-        vertLines: { color: '#f0f0f0' },
-        horzLines: { color: '#f0f0f0' },
+        vertLines: { color: "#f0f0f0" },
+        horzLines: { color: "#f0f0f0" },
       },
       timeScale: {
         timeVisible: true,
@@ -77,12 +94,12 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
 
     // Add candlestick series using new API
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#26a69a',
-      downColor: '#ef5350',
+      upColor: "#26a69a",
+      downColor: "#ef5350",
       borderVisible: false,
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
-    }) as ISeriesApi<'Candlestick'>;
+      wickUpColor: "#26a69a",
+      wickDownColor: "#ef5350",
+    }) as ISeriesApi<"Candlestick">;
 
     candlestickSeriesRef.current = candlestickSeries;
 
@@ -104,14 +121,13 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
       }
     };
 
-    window.addEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener("resize", handleResize);
       chart.remove();
     };
   }, [symbol, interval]);
-
 
   // WebSocket connection for real-time updates
   useEffect(() => {
@@ -123,18 +139,22 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
 
     ws.onopen = () => {
       if (isMounted) {
-        console.log('WebSocket connected');
+        console.log("WebSocket connected");
       }
     };
 
     ws.onmessage = (event) => {
       if (!isMounted || !candlestickSeriesRef.current) return;
-      
+
       try {
         const price: MarketPrice = JSON.parse(event.data);
-        
+
         // Only update if it matches the current symbol and interval
-        if (price.symbol === symbol && price.interval === interval && candlestickSeriesRef.current) {
+        if (
+          price.symbol === symbol &&
+          price.interval === interval &&
+          candlestickSeriesRef.current
+        ) {
           const time = (new Date(price.time).getTime() / 1000) as Time;
           const candle: CandlestickData<Time> = {
             time,
@@ -148,19 +168,19 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
           candlestickSeriesRef.current.update(candle);
         }
       } catch (err) {
-        console.error('Error parsing WebSocket message:', err);
+        console.error("Error parsing WebSocket message:", err);
       }
     };
 
     ws.onerror = (error) => {
       if (isMounted) {
-        console.error('WebSocket error:', error);
+        console.error("WebSocket error:", error);
       }
     };
 
     ws.onclose = () => {
       if (isMounted) {
-        console.log('WebSocket disconnected');
+        console.log("WebSocket disconnected");
       }
     };
 
@@ -168,7 +188,10 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
 
     return () => {
       isMounted = false;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      if (
+        ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING
+      ) {
         ws.close();
       }
     };
@@ -186,18 +209,18 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
 
     const marker: SeriesMarker<Time> = {
       time: (selectedNewsTime / 1000) as Time,
-      position: 'belowBar',
-      color: '#2196F3',
-      shape: 'circle',
+      position: "belowBar",
+      color: "#2196F3",
+      shape: "circle",
       size: 2,
-      text: 'News',
+      text: "News",
     };
 
     // Set markers using the plugin
     try {
       markersPluginRef.current.setMarkers([marker]);
     } catch (err) {
-      console.warn('Could not set markers:', err);
+      console.warn("Could not set markers:", err);
     }
   }, [selectedNewsTime]);
 
@@ -209,12 +232,9 @@ export default function Chart({ symbol = 'BTCUSDT', interval = '1h', selectedNew
         </div>
       )}
       {error && (
-        <div className="p-4 bg-red-50 text-red-800 rounded mb-4">
-          {error}
-        </div>
+        <div className="p-4 bg-red-50 text-red-800 rounded mb-4">{error}</div>
       )}
       <div ref={chartContainerRef} className="flex-1 w-full" />
     </div>
   );
 }
-
