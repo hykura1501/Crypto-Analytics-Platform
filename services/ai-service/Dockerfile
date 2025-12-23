@@ -1,37 +1,25 @@
-# Multi-stage build for AI Service
-FROM python:3.11-slim AS builder
+# Build stage
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Copy go mod files
+COPY go.mod go.sum* ./
+RUN go mod download
 
-# Copy requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Copy source code
+COPY . .
+
+# Build
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ai-service ./cmd/main.go
 
 # Runtime stage
-FROM python:3.11-slim
+FROM gcr.io/distroless/base-debian12:latest
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libpq5 \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/ai-service /app/ai-service
 
-# Copy Python packages from builder
-COPY --from=builder /root/.local /root/.local
+EXPOSE 8084
 
-# Copy application code
-COPY ./app ./app
-
-# Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
-
-# Run the application
-CMD ["python", "-m", "app.main"]
+CMD ["/app/ai-service"]

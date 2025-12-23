@@ -6,27 +6,35 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/IBM/sarama"
 )
 
 type Producer struct {
-	writer *kafka.Writer
+	producer sarama.SyncProducer
+	topic    string
 }
 
 func NewProducer(broker, topic string) *Producer {
-	writer := &kafka.Writer{
-		Addr:     kafka.TCP(broker),
-		Topic:    topic,
-		Balancer: &kafka.LeastBytes{},
+	config := sarama.NewConfig()
+	config.Producer.Return.Successes = true
+	config.Producer.RequiredAcks = sarama.WaitForAll
+	config.Producer.Retry.Max = 5
+
+	producer, err := sarama.NewSyncProducer([]string{broker}, config)
+	if err != nil {
+		log.Panicf("Failed to setup Sarama producer: %v", err)
 	}
 
-	log.Printf("crawler-service: Kafka producer created for topic: %s at %s", topic, broker)
-	return &Producer{writer: writer}
+	log.Printf("crawler-service: Sarama Kafka producer created for topic: %s at %s", topic, broker)
+	return &Producer{
+		producer: producer,
+		topic:    topic,
+	}
 }
 
 func (p *Producer) PublishNews(ctx context.Context, newsID int64, title, content string) error {
-	if p == nil || p.writer == nil {
-		return nil
+	if p == nil || p.producer == nil {
+		return fmt.Errorf("producer is nil")
 	}
 
 	payload := map[string]interface{}{
@@ -40,15 +48,24 @@ func (p *Producer) PublishNews(ctx context.Context, newsID int64, title, content
 		return err
 	}
 
-	return p.writer.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(fmt.Sprintf("%d", newsID)),
-		Value: data,
-	})
+	msg := &sarama.ProducerMessage{
+		Topic: p.topic,
+		Key:   sarama.StringEncoder(fmt.Sprintf("%d", newsID)),
+		Value: sarama.ByteEncoder(data),
+	}
+
+	partition, offset, err := p.producer.SendMessage(msg)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Published news to Kafka [Sarama]: %d %s (partition: %d, offset: %d)", newsID, title, partition, offset)
+	return nil
 }
 
 func (p *Producer) Close() error {
-	if p != nil && p.writer != nil {
-		return p.writer.Close()
+	if p != nil && p.producer != nil {
+		return p.producer.Close()
 	}
 	return nil
 }

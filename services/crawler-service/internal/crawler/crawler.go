@@ -3,6 +3,7 @@ package crawler
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -35,19 +36,52 @@ type rssArticle struct {
 	Language    string
 }
 
+type sourceMeta struct {
+	name       string
+	rssURL     string
+	language   string
+	titleTag   string
+	linkTag    string
+	pubDateTag string
+}
+
 // CrawlOnce thực hiện crawl 1 vòng cho tất cả nguồn
 func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
 	totalSaved := 0
 
-	sources := []struct {
-		name     string
-		rssURL   string
-		language string
-	}{
-		{"CoinDesk", s.cfg.RSS.CoinDeskURL, "en"},
-		{"CoinTelegraph", s.cfg.RSS.CoinTelegraphURL, "en"},
-		{"VNExpress", s.cfg.RSS.VNExpressURL, "vi"},
-		{"VnEconomy", s.cfg.RSS.VnEconomyURL, "vi"},
+	sources := []sourceMeta{
+		{
+			name:       "CoinDesk",
+			rssURL:     s.cfg.RSS.CoinDeskURL,
+			language:   "en",
+			titleTag:   "title",
+			linkTag:    "link",
+			pubDateTag: "pubDate",
+		},
+		{
+			name:       "CoinTelegraph",
+			rssURL:     s.cfg.RSS.CoinTelegraphURL,
+			language:   "en",
+			titleTag:   "title",
+			linkTag:    "guid",
+			pubDateTag: "pubDate",
+		},
+		{
+			name:       "VNExpress",
+			rssURL:     s.cfg.RSS.VNExpressURL,
+			language:   "vi",
+			titleTag:   "title",
+			linkTag:    "link",
+			pubDateTag: "pubDate",
+		},
+		{
+			name:       "VnEconomy",
+			rssURL:     s.cfg.RSS.VnEconomyURL,
+			language:   "vi",
+			titleTag:   "title",
+			linkTag:    "link",
+			pubDateTag: "pubDate",
+		},
 	}
 
 	for _, src := range sources {
@@ -58,7 +92,7 @@ func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
 		}
 
 		log.Printf("📰 Crawling %s...", src.name)
-		articles := s.fetchRSS(ctx, src.name, src.rssURL, src.language)
+		articles := s.fetchRSS(ctx, src, src.rssURL)
 		log.Printf("Found %d articles from %s", len(articles), src.name)
 
 		for idx, a := range articles {
@@ -68,7 +102,8 @@ func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
 			default:
 			}
 
-			log.Printf("[%d/%d] Processing %s: %s", idx+1, len(articles), src.name, truncate(a.URL, 80))
+			// Log full URL for debugging, but truncate for display
+			log.Printf("[%d/%d] Processing %s: %s (len=%d)", idx+1, len(articles), src.name, a.URL, len(a.URL))
 
 			content, err := s.fetchArticleContent(a, src.name)
 			if err != nil || len(strings.TrimSpace(content)) < 100 {
@@ -100,8 +135,8 @@ func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
 	return totalSaved, nil
 }
 
-// fetchRSS dùng Colly để đọc RSS feed
-func (s *Service) fetchRSS(ctx context.Context, sourceName, rssURL, language string) []rssArticle {
+// fetchRSS dùng Colly để đọc RSS feed với config tags từ sourceMeta
+func (s *Service) fetchRSS(ctx context.Context, src sourceMeta, rssURL string) []rssArticle {
 	result := make([]rssArticle, 0, s.cfg.RSS.MaxArticlesPerRun)
 
 	c := colly.NewCollector(
@@ -114,9 +149,25 @@ func (s *Service) fetchRSS(ctx context.Context, sourceName, rssURL, language str
 			return
 		}
 
-		link := strings.TrimSpace(e.ChildText("link"))
-		title := strings.TrimSpace(e.ChildText("title"))
-		pubDateStr := strings.TrimSpace(e.ChildText("pubDate"))
+		// Get title using configured tag
+		title := strings.TrimSpace(e.ChildText(src.titleTag))
+		// Clean CDATA if present (CoinDesk uses CDATA for title)
+		if title != "" {
+			title = strings.TrimPrefix(title, "<![CDATA[")
+			title = strings.TrimSuffix(title, "]]>")
+			title = strings.TrimSpace(title)
+		}
+
+		// Get link using configured tag
+		link := strings.TrimSpace(e.ChildText(src.linkTag))
+		// Clean CDATA if present (CoinTelegraph uses CDATA for link)
+		if link != "" {
+			link = strings.TrimPrefix(link, "<![CDATA[")
+			link = strings.TrimSuffix(link, "]]>")
+			link = strings.TrimSpace(link)
+		}
+		// Get pubDate using configured tag
+		pubDateStr := strings.TrimSpace(e.ChildText(src.pubDateTag))
 
 		var publishedAt *time.Time
 		if pubDateStr != "" {
@@ -130,16 +181,16 @@ func (s *Service) fetchRSS(ctx context.Context, sourceName, rssURL, language str
 		}
 
 		result = append(result, rssArticle{
-			SourceID:    sourceName,
+			SourceID:    src.name,
 			URL:         link,
 			Title:       title,
 			PublishedAt: publishedAt,
-			Language:    language,
+			Language:    src.language,
 		})
 	})
 
 	if err := c.Visit(rssURL); err != nil {
-		log.Printf("Error fetching RSS for %s: %v", sourceName, err)
+		log.Printf("Error fetching RSS for %s: %v", src.name, err)
 	}
 
 	return result
@@ -167,14 +218,36 @@ func (s *Service) fetchArticleContent(a rssArticle, sourceName string) (string, 
 			})
 		})
 	case "CoinDesk":
-		c.OnHTML("article", func(e *colly.HTMLElement) {
-			e.ForEach("p", func(_ int, el *colly.HTMLElement) {
-				text := strings.TrimSpace(el.Text)
-				if text != "" {
+		// CoinDesk uses p.font-body.text-charcoal-900 for article content
+		c.OnHTML("p.font-body.text-charcoal-900", func(e *colly.HTMLElement) {
+			text := strings.TrimSpace(e.Text)
+			if text != "" && len(text) > 20 { // Filter out short text
+				contentBuilder.WriteString(text)
+				contentBuilder.WriteString("\n")
+			}
+		})
+		// Also try div.article-content-wrapper as fallback
+		c.OnHTML("div.article-content-wrapper p", func(e *colly.HTMLElement) {
+			text := strings.TrimSpace(e.Text)
+			if text != "" && len(text) > 20 && !strings.Contains(text, "Read full story") {
+				// Check if not already added
+				currentContent := contentBuilder.String()
+				if len(text) > 0 && (len(currentContent) == 0 || !strings.Contains(currentContent, text[:min(50, len(text))])) {
 					contentBuilder.WriteString(text)
 					contentBuilder.WriteString("\n")
 				}
-			})
+			}
+		})
+		// Additional fallback: try any p tag with class containing "font-body"
+		c.OnHTML("p[class*='font-body']", func(e *colly.HTMLElement) {
+			text := strings.TrimSpace(e.Text)
+			if text != "" && len(text) > 20 && !strings.Contains(text, "Read full story") {
+				currentContent := contentBuilder.String()
+				if len(currentContent) == 0 || !strings.Contains(currentContent, text[:min(50, len(text))]) {
+					contentBuilder.WriteString(text)
+					contentBuilder.WriteString("\n")
+				}
+			}
 		})
 	case "VNExpress":
 		c.OnHTML("article.fck_detail", func(e *colly.HTMLElement) {
@@ -200,10 +273,15 @@ func (s *Service) fetchArticleContent(a rssArticle, sourceName string) (string, 
 	}
 
 	if err := c.Visit(a.URL); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to visit URL: %w", err)
 	}
 
-	return contentBuilder.String(), nil
+	content := contentBuilder.String()
+	if content == "" {
+		return "", fmt.Errorf("no content extracted")
+	}
+
+	return content, nil
 }
 
 // insertArticle ghi vào Postgres, tránh trùng URL
@@ -240,4 +318,11 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
