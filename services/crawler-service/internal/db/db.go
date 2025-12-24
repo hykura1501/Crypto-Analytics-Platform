@@ -34,37 +34,40 @@ func Connect(cfg *config.DatabaseConfig) (*sql.DB, error) {
 
 func RunMigrations(db *sql.DB) error {
 	createTableSQL := `
+	CREATE TABLE IF NOT EXISTS sources (
+		source_id VARCHAR(100) PRIMARY KEY,
+		rss_url VARCHAR(2000) NOT NULL,
+		title_tag VARCHAR(100),
+		link_tag VARCHAR(100),
+		pub_date_tag VARCHAR(100),
+		summary_selector VARCHAR(100),
+		content_selector VARCHAR(100),
+		author_selector VARCHAR(100),
+		tags_selector VARCHAR(100),
+		created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+	);
+
 	CREATE TABLE IF NOT EXISTS articles (
 		id SERIAL PRIMARY KEY,
 		source_id VARCHAR(100) NOT NULL,
 		url VARCHAR(2000) UNIQUE NOT NULL,
-		url_normalized VARCHAR(2000),
-		content_hash VARCHAR(64),
 		title VARCHAR(1000) NOT NULL,
-		author VARCHAR(200),
+		author VARCHAR(1000),
 		published_at TIMESTAMP,
 		crawled_at TIMESTAMP NOT NULL DEFAULT NOW(),
-		html_raw_path VARCHAR(500),
 		content_text TEXT NOT NULL,
 		language VARCHAR(5) DEFAULT 'en',
-		tags TEXT[],
+		tags VARCHAR(1000),
 		summary TEXT,
-		entities JSONB,
 		sentiment_score FLOAT,
-		embedding_vector FLOAT[],
-		confidence FLOAT DEFAULT 1.0,
-		event_time TIMESTAMP,
-		event_type VARCHAR(50),
 		created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_articles_source_id ON articles(source_id);
 	CREATE INDEX IF NOT EXISTS idx_articles_url ON articles(url);
-	CREATE INDEX IF NOT EXISTS idx_articles_url_normalized ON articles(url_normalized);
 	CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at);
-	CREATE INDEX IF NOT EXISTS idx_articles_event_type ON articles(event_type);
-	CREATE INDEX IF NOT EXISTS idx_articles_content_hash ON articles(content_hash);
 	`
 
 	if _, err := db.Exec(createTableSQL); err != nil {

@@ -33,6 +33,7 @@ type rssArticle struct {
 	URL         string
 	Title       string
 	PublishedAt *time.Time
+	Author      string
 	Language    string
 }
 
@@ -121,7 +122,7 @@ func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
 			}
 
 			totalSaved++
-			log.Printf("✅ Saved: %s...", truncate(a.Title, 60))
+			log.Printf("✅ Saved: %s...", a.Title)
 
 			if s.producer != nil {
 				if err := s.producer.PublishNews(ctx, id, a.Title, content); err != nil {
@@ -311,13 +312,6 @@ RETURNING id;
 	}
 
 	return id, true, nil
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
 }
 
 func min(a, b int) int {

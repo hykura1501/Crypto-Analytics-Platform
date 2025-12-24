@@ -20,6 +20,8 @@ WORKDIR /app
 
 COPY --from=builder /app/ai-service /app/ai-service
 
-EXPOSE 8084
+COPY .env /app/.env
+
+EXPOSE 9001
 
 CMD ["/app/ai-service"]
