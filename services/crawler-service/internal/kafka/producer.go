@@ -40,7 +40,7 @@ func (p *Producer) PublishNews(ctx context.Context, newsID int64, title, content
 	payload := map[string]interface{}{
 		"news_id": newsID,
 		"title":   title,
-		"content": truncate(content, 1000),
+		"content": content,
 	}
 
 	data, err := json.Marshal(payload)
@@ -68,11 +68,4 @@ func (p *Producer) Close() error {
 		return p.producer.Close()
 	}
 	return nil
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
 }

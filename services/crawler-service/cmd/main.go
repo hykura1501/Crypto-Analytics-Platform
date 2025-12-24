@@ -45,25 +45,30 @@ func main() {
 	// HTTP server (health + manual trigger)
 	r := gin.Default()
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"service": "crawler-service-go",
-		})
-	})
-
-	r.POST("/crawl/once", func(c *gin.Context) {
-		count, err := crawlService.CrawlOnce(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
+	// API v1 Group
+	v1 := r.Group("/api/v1/news")
+	{
+		// Infrastructure Health Check
+		v1.GET("/health", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "ok",
+				"service": "crawler-service-go",
 			})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"saved": count,
 		})
-	})
+
+		v1.POST("/crawl/once", func(c *gin.Context) {
+			count, err := crawlService.CrawlOnce(c.Request.Context())
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": err.Error(),
+				})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"saved": count,
+			})
+		})
+	}
 
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	log.Printf("Starting crawler-service (Go + Colly) on %s", addr)

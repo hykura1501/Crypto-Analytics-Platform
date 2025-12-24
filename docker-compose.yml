@@ -77,6 +77,14 @@ services:
     volumes:
       - ./services/ai-service:/app
     restart: unless-stopped
+    ports:
+      - "9001:9001"
+    labels:
+      - "traefik.enable=true"
+      # Route: /api/v1/ai/*
+      - "traefik.http.routers.ai.rule=PathPrefix(`/api/v1/ai`)"
+      - "traefik.http.services.ai.loadbalancer.server.port=9001"
+      - "traefik.http.routers.ai.middlewares=cors-headers"
 
 volumes:
   postgres_data:
