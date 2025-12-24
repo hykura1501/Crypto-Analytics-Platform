@@ -20,20 +20,20 @@ services:
       retries: 5
 
   # Redis Cache
-  redis:
-    image: redis:alpine
-    container_name: crypto_redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - crypto-network
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # redis:
+  #   image: redis:alpine
+  #   container_name: crypto_redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - crypto-network
+  #   healthcheck:
+  #     test: [ "CMD", "redis-cli", "ping" ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
   # Kafka Message Broker (KRaft mode)
   kafka:
@@ -92,7 +92,7 @@ services:
       # CORS configuration
       - "--entrypoints.web.http.middlewares=cors-headers"
     ports:
-      - "80:80" # API Entrypoint
+      - "5000:80" # API Entrypoint
       - "8080:8080" # Dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -117,20 +117,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: crypto_db
-      DB_SSLMODE: disable
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      JWT_SECRET: your-super-secret-jwt-key-change-this-in-production
-      JWT_ACCESS_EXPIRY: 15m
-      JWT_REFRESH_EXPIRY: 168h
-      SERVER_PORT: 8081
-      GIN_MODE: debug
     networks:
       - crypto-network
     restart: unless-stopped
@@ -152,20 +138,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: crypto_db
-      DB_SSLMODE: disable
-      KAFKA_BROKER: kafka:9092
-      KAFKA_TOPIC: market_price_updates
-      BINANCE_API_URL: https://api.binance.com
-      BINANCE_WS_URL: wss://stream.binance.com:9443
-      SERVER_PORT: 8082
-      GIN_MODE: debug
-      DEFAULT_SYMBOLS: BTCUSDT,ETHUSDT,BNBUSDT
     networks:
       - crypto-network
     restart: unless-stopped
@@ -191,19 +163,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: crypto_db
-      KAFKA_BROKER: kafka:9092
-      KAFKA_TOPIC: news_new_article
-      COINDESK_RSS_URL: https://www.coindesk.com/arc/outboundfeeds/rss/
-      COINTELEGRAPH_RSS_URL: https://cointelegraph.com/rss
-      CRAWL_INTERVAL_MINUTES: 10
-      MAX_ARTICLES_PER_RUN: 20
-      SERVER_PORT: 8083
     networks:
       - crypto-network
     restart: unless-stopped
@@ -225,16 +184,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: crypto_db
-      KAFKA_BROKER: kafka:9092
-      KAFKA_TOPIC: news_new_article
-      KAFKA_GROUP_ID: ai-service-group
-      API_PORT: 9001
     networks:
       - crypto-network
     restart: unless-stopped

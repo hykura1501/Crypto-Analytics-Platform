@@ -8,6 +8,7 @@ type Config struct {
 	Database DatabaseConfig
 	Kafka    KafkaConfig
 	API      APIConfig
+	Gemini   GeminiConfig
 }
 
 type DatabaseConfig struct {
@@ -41,6 +42,11 @@ type APIConfig struct {
 	Port string
 }
 
+type GeminiConfig struct {
+	APIKey string
+	Model  string
+}
+
 func Load() *Config {
 	return &Config{
 		Database: DatabaseConfig{
@@ -58,6 +64,10 @@ func Load() *Config {
 			Broker:  getEnv("KAFKA_BROKER", "kafka:9092"),
 			Topics:  topics,
 			GroupID: getEnv("KAFKA_GROUP_ID", "ai-service-group-v2"),
+		},
+		Gemini: GeminiConfig{
+			APIKey: getEnv("GEMINI_API_KEY", ""),
+			Model:  getEnv("GEMINI_MODEL", ""),
 		},
 	}
 }

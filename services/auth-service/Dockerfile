@@ -23,8 +23,8 @@ WORKDIR /root/
 # Copy binary from builder
 COPY --from=builder /app/main .
 
-# Copy config files if needed
-# COPY --from=builder /app/config ./config
+# Copy environment file
+COPY .env .env
 
 EXPOSE 8081
 

@@ -17,6 +17,8 @@ WORKDIR /app
 
 COPY --from=builder /app/crawler-service /app/crawler-service
 
+COPY .env /app/.env
+
 EXPOSE 8083
 
 ENTRYPOINT ["/app/crawler-service"]

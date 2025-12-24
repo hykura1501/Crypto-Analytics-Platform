@@ -12,12 +12,18 @@ import (
 	"github.com/crypto-platform/auth-service/internal/service"
 	"github.com/crypto-platform/auth-service/pkg/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
 func main() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using system environment variables")
+	}
+
 	// Load configuration
 	cfg := config.Load()
 

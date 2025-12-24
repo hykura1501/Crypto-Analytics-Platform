@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 
 	"github.com/crypto-platform/crawler-service/config"
 	"github.com/crypto-platform/crawler-service/internal/crawler"
@@ -18,6 +19,11 @@ import (
 )
 
 func main() {
+	// Load .env file if present
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found for crawler-service, using system environment variables")
+	}
+
 	cfg := config.Load()
 
 	// Kết nối DB (sẽ tự động chạy migrations)
