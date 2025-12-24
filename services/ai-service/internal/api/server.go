@@ -4,22 +4,25 @@ import (
 	"database/sql"
 
 	"github.com/crypto-platform/ai-service/config"
+	"github.com/crypto-platform/ai-service/internal/handler"
 	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
-	router *gin.Engine
-	config *config.Config
-	db     *sql.DB
+	router     *gin.Engine
+	config     *config.Config
+	db         *sql.DB
+	rssHandler *handler.RssHandler
 }
 
-func NewServer(config *config.Config, db *sql.DB) *Server {
+func NewServer(config *config.Config, db *sql.DB, rssHandler *handler.RssHandler) *Server {
 	router := gin.New()
 
 	s := &Server{
-		config: config,
-		db:     db,
-		router: router,
+		config:     config,
+		db:         db,
+		router:     router,
+		rssHandler: rssHandler,
 	}
 
 	s.setupRoutes()
@@ -34,6 +37,7 @@ func (s *Server) setupRoutes() {
 			c.JSON(200, gin.H{"service": "ai-service", "status": "running"})
 		})
 		// Add more routes here
+		v1.POST("/rss/:sourceId", s.handleRss)
 	}
 }
 

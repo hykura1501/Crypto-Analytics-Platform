@@ -11,9 +11,15 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env file if present
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found for api-gateway, using system environment variables")
+	}
+
 	// Load configuration
 	cfg := config.Load()
 

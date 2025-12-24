@@ -5,6 +5,7 @@ go 1.25.4
 require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/joho/godotenv v1.5.1
 	github.com/segmentio/kafka-go v0.4.49
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
