@@ -9,20 +9,22 @@ import (
 )
 
 type Server struct {
-	router     *gin.Engine
-	config     *config.Config
-	db         *sql.DB
-	rssHandler *handler.RssHandler
+	router          *gin.Engine
+	config          *config.Config
+	db              *sql.DB
+	rssHandler      *handler.RssHandler
+	selectorHandler *handler.SelectorHandler
 }
 
-func NewServer(config *config.Config, db *sql.DB, rssHandler *handler.RssHandler) *Server {
+func NewServer(config *config.Config, db *sql.DB, rssHandler *handler.RssHandler, selectorHandler *handler.SelectorHandler) *Server {
 	router := gin.New()
 
 	s := &Server{
-		config:     config,
-		db:         db,
-		router:     router,
-		rssHandler: rssHandler,
+		config:          config,
+		db:              db,
+		router:          router,
+		rssHandler:      rssHandler,
+		selectorHandler: selectorHandler,
 	}
 
 	s.setupRoutes()
@@ -38,6 +40,7 @@ func (s *Server) setupRoutes() {
 		})
 		// Add more routes here
 		v1.POST("/rss/:sourceId", s.handleRss)
+		v1.POST("/selector/:sourceId", s.handleSelector)
 	}
 }
 

@@ -57,6 +57,7 @@ func main() {
 	}
 
 	rssHandler := handler.NewRssHandler(db.DB, geminiClient) // Inject global DB
+	selectorHandler := handler.NewSelectorHandler(db.DB, geminiClient)
 
 	log.Println(strings.Repeat("=", 60))
 	log.Println("AI Service is ready. Waiting for news messages...")
@@ -77,7 +78,7 @@ func main() {
 	}()
 
 	// Create API server
-	apiServer := api.NewServer(cfg, db.DB, rssHandler)
+	apiServer := api.NewServer(cfg, db.DB, rssHandler, selectorHandler)
 	go func() {
 		if err := apiServer.Run(); err != nil {
 			log.Fatalf("Failed to run API server: %v", err)
@@ -117,6 +118,15 @@ func main() {
 					continue
 				}
 				rssHandler.Handle(ctx, rssStructure)
+
+			case config.KafkaTopicNewsAnalyzeCssSelector:
+				var selectorMsg handler.SelectorMessage
+				err := json.Unmarshal(msg.Value, &selectorMsg)
+				if err != nil {
+					log.Printf("Error unmarshalling selector message: %v", err)
+					continue
+				}
+				selectorHandler.Handle(ctx, selectorMsg)
 
 			default:
 				log.Printf("⚠️ Received message from unknown topic: %s", msg.Topic)

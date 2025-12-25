@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,7 +10,10 @@ import (
 	"os/signal"
 	"time"
 
+	"regexp"
+
 	"github.com/gin-gonic/gin"
+	"github.com/gocolly/colly/v2"
 	"github.com/joho/godotenv"
 
 	"github.com/crypto-platform/crawler-service/config"
@@ -17,6 +21,145 @@ import (
 	"github.com/crypto-platform/crawler-service/internal/db"
 	ckafka "github.com/crypto-platform/crawler-service/internal/kafka"
 )
+
+type CrawlerSource struct {
+	SourceID string `db:"source_id"`
+	RssURL   string `db:"rss_url"`
+}
+
+func InitializeCrawlerSource(cfg *config.Config, database *sql.DB, producer *ckafka.Producer) {
+	// Insert some soure_id to db if not exist
+	crawlerSource := []CrawlerSource{
+		{
+			SourceID: "CoinDesk",
+			RssURL:   cfg.RSS.CoinDeskURL,
+		},
+		{
+			SourceID: "CoinTelegraph",
+			RssURL:   cfg.RSS.CoinTelegraphURL,
+		},
+		{
+			SourceID: "VNExpress",
+			RssURL:   cfg.RSS.VNExpressURL,
+		},
+		{
+			SourceID: "VnEconomy",
+			RssURL:   cfg.RSS.VnEconomyURL,
+		},
+	}
+	for _, source := range crawlerSource {
+		result, err := database.Exec(`
+			INSERT INTO sources (source_id, rss_url)
+			VALUES ($1, $2)
+			ON CONFLICT (source_id) DO NOTHING
+		`, source.SourceID, source.RssURL)
+		if err != nil {
+			log.Fatalf("Failed to insert crawler source %s: %v", source.SourceID, err)
+		}
+
+		// Check if row was actually inserted (not a conflict)
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			log.Printf("⏭️  Source %s already exists, skipping Kafka analysis", source.SourceID)
+			continue
+		}
+
+		log.Printf("Initialized crawler source: %s", source.SourceID)
+
+		// Fetch RSS XML
+		c := colly.NewCollector(
+			colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+				"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		)
+
+		var firstItemXML string
+		var firstArticleLink string
+
+		// Parse RSS and get only the first item
+		c.OnXML("//item", func(e *colly.XMLElement) {
+			if firstItemXML != "" {
+				return
+			}
+			// Get the raw XML of this item element
+			firstItemXML = e.Text
+
+			link := e.ChildText("link")
+			if link == "" {
+				link = e.ChildText("guid")
+			}
+			if link != "" {
+				firstArticleLink = link
+			}
+		})
+
+		if err := c.Visit(source.RssURL); err != nil {
+			log.Printf("Error fetching RSS for %s: %v", source.SourceID, err)
+			continue
+		}
+
+		// Send only 1 item to Kafka for RSS structure analysis
+		if producer != nil && firstItemXML != "" {
+			message := map[string]string{
+				"source_id":  source.SourceID,
+				"xml_string": "<item>" + firstItemXML + "</item>",
+			}
+			if err := producer.SendMessage("news_analyze_rss_structure", message); err != nil {
+				log.Printf("Failed to send RSS analysis message for %s: %v", source.SourceID, err)
+			} else {
+				log.Printf("✅ Sent 1 RSS item to Kafka for analysis: %s", source.SourceID)
+			}
+		}
+
+		// Fetch HTML from first article and send for CSS selector analysis
+		if producer != nil && firstArticleLink != "" {
+			htmlCollector := colly.NewCollector(
+				colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+					"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+			)
+
+			var htmlContent string
+			htmlCollector.OnResponse(func(r *colly.Response) {
+				htmlContent = string(r.Body)
+				log.Printf("✅ Fetched HTML from: %s", r.Request.URL)
+			})
+
+			log.Printf("Fetching article HTML for CSS selector analysis: %s", firstArticleLink)
+
+			if err := htmlCollector.Visit(firstArticleLink); err != nil {
+				log.Printf("Error fetching article HTML from %s: %v", firstArticleLink, err)
+			} else if htmlContent != "" {
+				// Remove script and style tags content
+				cleanedHTML := removeScriptAndStyleTags(htmlContent)
+
+				message := map[string]string{
+					"source_id":   source.SourceID,
+					"html_string": cleanedHTML,
+				}
+				if err := producer.SendMessage("news_analyze_css_selector", message); err != nil {
+					log.Printf("Failed to send CSS selector analysis message for %s: %v", source.SourceID, err)
+				} else {
+					log.Printf("✅ Sent cleaned HTML to Kafka for CSS selector analysis: %s", source.SourceID)
+				}
+			}
+		}
+	}
+}
+
+func removeScriptAndStyleTags(html string) string {
+	// Remove script tags and their content
+	scriptRegex := regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	html = scriptRegex.ReplaceAllString(html, "")
+
+	// Remove style tags and their content
+	styleRegex := regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	html = styleRegex.ReplaceAllString(html, "")
+
+	// Remove svg tags and their content
+	svgRegex := regexp.MustCompile(`(?is)<svg[^>]*>.*?</svg>`)
+	html = svgRegex.ReplaceAllString(html, "")
+
+	return html
+}
 
 func main() {
 	// Load .env file if present
@@ -41,6 +184,9 @@ func main() {
 	}
 
 	crawlService := crawler.NewService(cfg, database, producer)
+
+	// Initialize crawler sources and send RSS XML to Kafka
+	go InitializeCrawlerSource(cfg, database, producer)
 
 	// Run scheduler
 	ctx, cancel := context.WithCancel(context.Background())
