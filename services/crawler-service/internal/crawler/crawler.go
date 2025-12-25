@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +27,104 @@ func NewService(cfg *config.Config, db *sql.DB, producer *ckafka.Producer) *Serv
 		db:       db,
 		producer: producer,
 	}
+}
+
+func (s *Service) AnalyzeSource(sourceID, rssURL string) error {
+	log.Printf("🔍 Analyzing source: %s (%s)", sourceID, rssURL)
+
+	// Fetch RSS XML
+	c := colly.NewCollector(
+		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+			"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+	)
+
+	var firstItemXML string
+	var firstArticleLink string
+
+	// Parse RSS and get only the first item
+	c.OnXML("//item", func(e *colly.XMLElement) {
+		if firstItemXML != "" {
+			return
+		}
+		// Get the raw XML of this item element
+		firstItemXML = e.Text
+
+		link := e.ChildText("link")
+		if link == "" {
+			link = e.ChildText("guid")
+		}
+		if link != "" {
+			firstArticleLink = link
+		}
+	})
+
+	if err := c.Visit(rssURL); err != nil {
+		log.Printf("Error fetching RSS for %s: %v", sourceID, err)
+		return err
+	}
+
+	// Send only 1 item to Kafka for RSS structure analysis
+	if s.producer != nil && firstItemXML != "" {
+		message := map[string]string{
+			"source_id":  sourceID,
+			"xml_string": "<item>" + firstItemXML + "</item>",
+		}
+		if err := s.producer.SendMessage("news_analyze_rss_structure", message); err != nil {
+			log.Printf("Failed to send RSS analysis message for %s: %v", sourceID, err)
+		} else {
+			log.Printf("✅ Sent 1 RSS item to Kafka for analysis: %s", sourceID)
+		}
+	}
+
+	// Fetch HTML from first article and send for CSS selector analysis
+	if s.producer != nil && firstArticleLink != "" {
+		htmlCollector := colly.NewCollector(
+			colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+				"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		)
+
+		var htmlContent string
+		htmlCollector.OnResponse(func(r *colly.Response) {
+			htmlContent = string(r.Body)
+			log.Printf("✅ Fetched HTML from: %s", r.Request.URL)
+		})
+
+		log.Printf("Fetching article HTML for CSS selector analysis: %s", firstArticleLink)
+
+		if err := htmlCollector.Visit(firstArticleLink); err != nil {
+			log.Printf("Error fetching article HTML from %s: %v", firstArticleLink, err)
+		} else if htmlContent != "" {
+			// Remove script and style tags content
+			cleanedHTML := removeScriptAndStyleTags(htmlContent)
+
+			message := map[string]string{
+				"source_id":   sourceID,
+				"html_string": cleanedHTML,
+			}
+			if err := s.producer.SendMessage("news_analyze_css_selector", message); err != nil {
+				log.Printf("Failed to send CSS selector analysis message for %s: %v", sourceID, err)
+			} else {
+				log.Printf("✅ Sent cleaned HTML to Kafka for CSS selector analysis: %s", sourceID)
+			}
+		}
+	}
+	return nil
+}
+
+func removeScriptAndStyleTags(html string) string {
+	// Remove script tags and their content
+	scriptRegex := regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	html = scriptRegex.ReplaceAllString(html, "")
+
+	// Remove style tags and their content
+	styleRegex := regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	html = styleRegex.ReplaceAllString(html, "")
+
+	// Remove svg tags and their content
+	svgRegex := regexp.MustCompile(`(?is)<svg[^>]*>.*?</svg>`)
+	html = svgRegex.ReplaceAllString(html, "")
+
+	return html
 }
 
 type rssArticle struct {
