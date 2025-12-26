@@ -11,22 +11,24 @@ import (
 )
 
 type Server struct {
-	router        *gin.Engine
-	config        *config.Config
-	db            *sql.DB
-	crawlService  *crawler.Service
-	sourceHandler *handler.SourceHandler
+	router         *gin.Engine
+	config         *config.Config
+	db             *sql.DB
+	crawlService   *crawler.Service
+	sourceHandler  *handler.SourceHandler
+	articleHandler *handler.ArticleHandler
 }
 
 func NewServer(config *config.Config, db *sql.DB, crawlService *crawler.Service, sourceHandler *handler.SourceHandler) *Server {
 	router := gin.Default()
 
 	s := &Server{
-		config:        config,
-		db:            db,
-		router:        router,
-		crawlService:  crawlService,
-		sourceHandler: sourceHandler,
+		config:         config,
+		db:             db,
+		router:         router,
+		crawlService:   crawlService,
+		sourceHandler:  sourceHandler,
+		articleHandler: handler.NewArticleHandler(db),
 	}
 
 	s.setupRoutes()
@@ -47,6 +49,9 @@ func (s *Server) setupRoutes() {
 
 		// Crawler trigger
 		v1.POST("/crawl/once", s.handleCrawlOnce)
+
+		// Articles endpoint
+		v1.GET("/articles", s.articleHandler.ListArticles)
 
 		// Source CRUD endpoints
 		v1.GET("/sources", s.listSources)

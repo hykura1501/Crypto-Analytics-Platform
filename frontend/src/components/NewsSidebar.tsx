@@ -18,8 +18,9 @@ export default function NewsSidebar({ onNewsClick }: NewsSidebarProps) {
         const data = await apiClient.getNews({ limit: 50 });
         setArticles(data);
         setError(null);
-      } catch (err: any) {
-        setError(err.response?.data?.message || err.message || 'Failed to load news');
+      } catch (err) {
+        const error = err as { response?: { data?: { message?: string } }; message?: string };
+        setError(error.response?.data?.message || error.message || 'Failed to load news');
       } finally {
         setLoading(false);
       }
@@ -78,10 +79,13 @@ export default function NewsSidebar({ onNewsClick }: NewsSidebarProps) {
         )}
         
         {articles.map((article) => (
-          <div
+          <a
             key={article.id}
+            href={article.url}
+            target="_blank"
+            rel="noopener noreferrer"
             onClick={() => article.published_at && onNewsClick(article.published_at)}
-            className="p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors"
+            className="block p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors no-underline"
           >
             <div className="flex items-start justify-between mb-2">
               <span className="text-xs font-medium text-gray-500 uppercase">
@@ -106,7 +110,7 @@ export default function NewsSidebar({ onNewsClick }: NewsSidebarProps) {
                 </span>
               )}
             </div>
-          </div>
+          </a>
         ))}
       </div>
     </div>
