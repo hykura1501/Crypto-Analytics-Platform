@@ -62,7 +62,7 @@ func (h *NewsHandler) Handle(ctx context.Context, msgValue []byte) {
 	// Get article details for causal analysis
 	var article struct {
 		ID          int
-		PublishedAt sql.NullTime
+		PublishedAt sql.NullString // Changed from sql.NullTime to sql.NullString since published_at is now VARCHAR
 	}
 
 	query = `SELECT id, published_at FROM articles WHERE id = $1`

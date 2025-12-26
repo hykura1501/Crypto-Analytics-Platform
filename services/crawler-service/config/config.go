@@ -62,7 +62,7 @@ func Load() *Config {
 			CoinTelegraphURL:  getEnv("COINTELEGRAPH_RSS_URL", "https://cointelegraph.com/rss"),
 			VNExpressURL:      getEnv("VNEXPRESS_RSS_URL", "https://vnexpress.net/rss/kinh-doanh.rss"),
 			VnEconomyURL:      getEnv("VNECONOMY_RSS_URL", "https://vneconomy.vn/thi-truong-chung-khoan.rss"),
-			MaxArticlesPerRun: getEnvInt("MAX_ARTICLES_PER_RUN", 20),
+			MaxArticlesPerRun: getEnvInt("MAX_ARTICLES_PER_RUN", 50),
 		},
 		Crawler: CrawlerConfig{
 			IntervalMinutes: getEnvInt("CRAWL_INTERVAL_MINUTES", 10),

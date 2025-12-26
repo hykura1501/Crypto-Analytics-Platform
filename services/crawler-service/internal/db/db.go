@@ -54,7 +54,7 @@ func RunMigrations(db *sql.DB) error {
 		url VARCHAR(2000) UNIQUE NOT NULL,
 		title VARCHAR(1000) NOT NULL,
 		author VARCHAR(1000),
-		published_at TIMESTAMP,
+		published_at VARCHAR(150),
 		crawled_at TIMESTAMP NOT NULL DEFAULT NOW(),
 		content_text TEXT NOT NULL,
 		language VARCHAR(5) DEFAULT 'en',

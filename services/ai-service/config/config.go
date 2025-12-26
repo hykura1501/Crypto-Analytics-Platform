@@ -58,7 +58,7 @@ func Load() *Config {
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
 		API: APIConfig{
-			Port: getEnv("API_PORT", "8080"),
+			Port: getEnv("API_PORT", "9001"),
 		},
 		Kafka: KafkaConfig{
 			Broker:  getEnv("KAFKA_BROKER", "kafka:9092"),
