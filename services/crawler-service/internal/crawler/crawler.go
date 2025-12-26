@@ -18,6 +18,20 @@ import (
 	ckafka "github.com/crypto-platform/crawler-service/internal/kafka"
 )
 
+// setupBrowserLikeCollector configures a collector with browser-like headers and settings
+func setupBrowserLikeCollector() *colly.Collector {
+	c := colly.NewCollector(
+		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		colly.Async(false),
+	)
+	// Handle errors
+	c.OnError(func(r *colly.Response, err error) {
+		log.Printf("Error fetching %s: %v (Status: %d)", r.Request.URL, err, r.StatusCode)
+	})
+
+	return c
+}
+
 type Service struct {
 	cfg      *config.Config
 	db       *sql.DB
@@ -36,10 +50,7 @@ func (s *Service) AnalyzeSource(sourceID, rssURL string) error {
 	log.Printf("🔍 Analyzing source: %s (%s)", sourceID, rssURL)
 
 	// Fetch RSS XML
-	c := colly.NewCollector(
-		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-			"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-	)
+	c := setupBrowserLikeCollector()
 
 	var firstItemXML string
 	var articleLinks []string
@@ -85,10 +96,7 @@ func (s *Service) AnalyzeSource(sourceID, rssURL string) error {
 
 	// Fetch HTML from first 2 articles and send for CSS selector analysis
 	if s.producer != nil && len(articleLinks) > 0 {
-		htmlCollector := colly.NewCollector(
-			colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-				"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-		)
+		htmlCollector := setupBrowserLikeCollector()
 
 		var htmlContents []string
 		var fetchedCount int
@@ -430,10 +438,7 @@ func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
 func (s *Service) fetchRSS(ctx context.Context, src sourceMeta, rssURL string) []rssArticle {
 	result := make([]rssArticle, 0, s.cfg.RSS.MaxArticlesPerRun)
 
-	c := colly.NewCollector(
-		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-			"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-	)
+	c := setupBrowserLikeCollector()
 
 	c.OnXML("//item", func(e *colly.XMLElement) {
 		if len(result) >= s.cfg.RSS.MaxArticlesPerRun {
@@ -489,11 +494,7 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 	var summaryBuilder strings.Builder
 	var tagsBuilder strings.Builder
 
-	c := colly.NewCollector(
-		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-			"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-		colly.Async(false),
-	)
+	c := setupBrowserLikeCollector()
 
 	// Extract content using content_selector from database
 	if src.contentSelector != "" {
