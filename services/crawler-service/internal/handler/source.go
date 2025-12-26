@@ -59,14 +59,41 @@ func (h *SourceHandler) ListSources() ([]Source, error) {
 	sources := []Source{}
 	for rows.Next() {
 		var s Source
+		var titleTag, linkTag, pubDateTag sql.NullString
+		var summarySelector, contentSelector, authorSelector, tagsSelector sql.NullString
+
 		err := rows.Scan(
-			&s.SourceID, &s.RssURL, &s.TitleTag, &s.LinkTag, &s.PubDateTag,
-			&s.SummarySelector, &s.ContentSelector, &s.AuthorSelector, &s.TagsSelector,
+			&s.SourceID, &s.RssURL, &titleTag, &linkTag, &pubDateTag,
+			&summarySelector, &contentSelector, &authorSelector, &tagsSelector,
 			&s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
+
+		// Convert sql.NullString to string
+		if titleTag.Valid {
+			s.TitleTag = titleTag.String
+		}
+		if linkTag.Valid {
+			s.LinkTag = linkTag.String
+		}
+		if pubDateTag.Valid {
+			s.PubDateTag = pubDateTag.String
+		}
+		if summarySelector.Valid {
+			s.SummarySelector = summarySelector.String
+		}
+		if contentSelector.Valid {
+			s.ContentSelector = contentSelector.String
+		}
+		if authorSelector.Valid {
+			s.AuthorSelector = authorSelector.String
+		}
+		if tagsSelector.Valid {
+			s.TagsSelector = tagsSelector.String
+		}
+
 		sources = append(sources, s)
 	}
 	return sources, nil
@@ -74,6 +101,9 @@ func (h *SourceHandler) ListSources() ([]Source, error) {
 
 func (h *SourceHandler) GetSource(sourceID string) (*Source, error) {
 	var s Source
+	var titleTag, linkTag, pubDateTag sql.NullString
+	var summarySelector, contentSelector, authorSelector, tagsSelector sql.NullString
+
 	err := h.DB.QueryRow(`
 		SELECT source_id, rss_url, title_tag, link_tag, pub_date_tag, 
 		       summary_selector, content_selector, author_selector, tags_selector,
@@ -81,13 +111,37 @@ func (h *SourceHandler) GetSource(sourceID string) (*Source, error) {
 		FROM sources
 		WHERE source_id = $1
 	`, sourceID).Scan(
-		&s.SourceID, &s.RssURL, &s.TitleTag, &s.LinkTag, &s.PubDateTag,
-		&s.SummarySelector, &s.ContentSelector, &s.AuthorSelector, &s.TagsSelector,
+		&s.SourceID, &s.RssURL, &titleTag, &linkTag, &pubDateTag,
+		&summarySelector, &contentSelector, &authorSelector, &tagsSelector,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+
+	// Convert sql.NullString to string
+	if titleTag.Valid {
+		s.TitleTag = titleTag.String
+	}
+	if linkTag.Valid {
+		s.LinkTag = linkTag.String
+	}
+	if pubDateTag.Valid {
+		s.PubDateTag = pubDateTag.String
+	}
+	if summarySelector.Valid {
+		s.SummarySelector = summarySelector.String
+	}
+	if contentSelector.Valid {
+		s.ContentSelector = contentSelector.String
+	}
+	if authorSelector.Valid {
+		s.AuthorSelector = authorSelector.String
+	}
+	if tagsSelector.Valid {
+		s.TagsSelector = tagsSelector.String
+	}
+
 	return &s, nil
 }
 

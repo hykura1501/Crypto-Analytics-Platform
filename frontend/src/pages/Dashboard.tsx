@@ -30,6 +30,12 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Crypto Analysis System</h1>
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate('/sources')}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              Sources
+            </button>
             <select
               value={selectedSymbol}
               onChange={(e) => setSelectedSymbol(e.target.value)}
