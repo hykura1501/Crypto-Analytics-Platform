@@ -41,91 +41,94 @@ type SelectorResponse struct {
 }
 
 func BuildSelectorAnalysisPrompt(htmlString string) string {
-	return fmt.Sprintf(`You are an expert Web Scraper and HTML Analyst. Analyze the provided HTML articles and extract COMMON CSS selectors that work for ALL articles following STRICT rules.
+	return fmt.Sprintf(`
+You are an expert Web Scraper and HTML Analyst.
 
-**INPUT HTML:**
-The HTML may contain 1-2 articles separated by "=== ARTICLE N ===" markers. Analyze ALL articles to find COMMON selectors.
+Your task: analyze the provided HTML article(s) and return CSS selectors that work CORRECTLY and CONSISTENTLY.
+
+================================
+INPUT HTML
+================================
+- The HTML may contain ONE or MULTIPLE articles
+- Multiple articles are separated by:
+  === ARTICLE N ===
+- If multiple articles exist, selectors MUST work for ALL of them
 
 %s
 
-**CRITICAL: MULTI-ARTICLE ANALYSIS:**
+================================
+CORE RULES (VERY IMPORTANT)
+================================
 
-1. **If multiple articles are provided:**
-   - Compare the HTML structure of ALL articles
-   - Find CSS selectors that are CONSISTENT across ALL articles
-   - The selector must work for EVERY article, not just one
-   - Look for common patterns, classes, or IDs that appear in all articles
-   - If a selector only works for one article, it's WRONG - find the common pattern
+### MULTI-ARTICLE RULE
+- If multiple articles are provided:
+  - Compare ALL article structures
+  - Find selectors COMMON to ALL articles
+  - If a selector works for only one article → IT IS INVALID
 
-2. **If only one article is provided:**
-   - Analyze that single article
-   - Still follow all format requirements below
+### SELECTOR RULES
+- Must be valid CSS selector
+- Must be ONE selector only (no commas)
+- No leading/trailing spaces
+- NOT allowed:
+  - 'body', 'html', 'div', 'p', 'span' alone
+  - multiple selectors
+- Must be specific enough to select the correct element
 
-**STRICT FORMAT REQUIREMENTS:**
+================================
+CONTENT SELECTOR (REQUIRED)
+================================
+Find the MAIN container that wraps ALL article paragraphs/text.
 
-1. **SELECTOR FORMAT:**
-   - MUST be valid CSS selectors (e.g., '.class-name', '#id-name', 'tag.class', 'parent > child')
-   - MUST be a SINGLE selector string (no commas, no multiple selectors)
-   - MUST NOT contain spaces at start/end
-   - MUST NOT be generic tags alone ('body', 'html', 'div', 'p', 'span' without classes/ids)
-   - MUST be specific enough to target the exact element
+CRITICAL SIMPLICITY RULE:
+- Use the SIMPLEST selector that fully contains the article content
+- Prefer:
+  - article
+  - article.class-name
+  - div.content / .article-body / .post-content
+- DO NOT over-nest:
+  - ❌ article.fck_detail > div.main-content
+  - ✅ article.fck_detail
+- Use nested selectors ONLY if:
+  1. Parent contains unrelated content AND
+  2. Child is the only real article content
 
-2. **CONTENT SELECTOR (REQUIRED):**
-   - Find the MAIN container that wraps ALL article paragraphs/text
-   - Look for: article tags, divs with classes like 'content', 'article-body', 'post-content', 'entry-content'
-   - Priority: article > [class*="content"] > [class*="article"] > [id*="content"]
-   - Examples: 'article', '.article-body', '#main-content', '.post-content', 'div.entry-content'
-   - NEVER return: 'body', 'html', 'div', 'p', or multiple selectors
+NEVER return:
+- 'body', 'html', 'div', 'p'
+- empty string
 
-3. **SUMMARY SELECTOR (OPTIONAL):**
-   - Find the excerpt/lead/summary paragraph (usually before main content)
-   - Look for: elements with classes like 'excerpt', 'summary', 'lead', 'intro'
-   - Return empty string "" if not found
-   - Examples: '.article-excerpt', '.summary', 'p.lead', '.intro-text'
+================================
+OPTIONAL SELECTORS
+================================
 
-4. **AUTHOR SELECTOR (OPTIONAL):**
-   - Find the author name element
-   - Look for: elements with classes like 'author', 'byline', 'writer', 'posted-by'
-   - Return empty string "" if not found
-   - Examples: '.author-name', '.byline', 'span.author', '.article-author'
+### summary_selector
+- Excerpt / lead paragraph before main content
+- Classes like: excerpt, summary, lead, intro
+- Return "" if not found or inconsistent
 
-5. **TAGS SELECTOR (OPTIONAL):**
-   - Find the container/list that holds tags/categories
-   - Look for: elements with classes like 'tags', 'categories', 'topics', 'labels'
-   - Return empty string "" if not found
-   - Examples: '.tags', '.categories', 'ul.tag-list', '.article-tags'
+### author_selector
+- Author / byline
+- Classes like: author, byline, writer
+- Return "" if not found or inconsistent
 
-**VALIDATION RULES:**
+### tags_selector
+- Tags / categories container
+- Classes like: tags, categories, topics
+- Return "" if not found or inconsistent
 
-✓ CORRECT: 'article', '.article-content', '#post-body', 'div.main-content'
-✗ WRONG: 'body', 'html', 'div', 'p', 'article, .content', ' article ', ''
+================================
+VALIDATION CHECK
+================================
+Before answering, verify:
+- content_selector exists in ALL articles
+- selector is as SIMPLE as possible
+- JSON format is EXACT
 
-**STEP-BY-STEP PROCESS:**
+================================
+OUTPUT FORMAT (JSON ONLY)
+================================
+Return ONLY this JSON structure:
 
-1. **If multiple articles:**
-   - Compare HTML structure of ALL articles
-   - Identify COMMON patterns (same classes, same IDs, same structure)
-   - Find selectors that match ALL articles, not just one
-   - Verify the selector works consistently across all articles
-
-2. **If single article:**
-   - Scan the HTML structure
-   - Identify the main article content container
-
-3. **For all cases:**
-   - Find the MAIN container that wraps ALL article paragraphs/text (must be consistent across articles if multiple)
-   - Find summary/excerpt if present (must be consistent if multiple articles)
-   - Locate author information if present (must be consistent if multiple articles)
-   - Find tags/categories container if present (must be consistent if multiple articles)
-   - Return selectors in the exact JSON format specified
-
-**VALIDATION FOR MULTI-ARTICLE:**
-- If you see "=== ARTICLE 1 ===" and "=== ARTICLE 2 ===", you MUST find selectors that work for BOTH
-- Test your selectors mentally: would they select the same element type in both articles?
-- If unsure, prefer more specific selectors that are likely to be consistent
-
-**OUTPUT FORMAT:**
-Return ONLY valid JSON matching this exact structure:
 {
   "summary_selector": "string or empty",
   "content_selector": "string (REQUIRED)",
@@ -133,9 +136,8 @@ Return ONLY valid JSON matching this exact structure:
   "tags_selector": "string or empty"
 }
 
-**CRITICAL:** 
-- content_selector is MANDATORY and must be a valid, specific CSS selector
-- All other fields can be empty string "" if not found
-- Do NOT include any explanation, only return the JSON object
+DO NOT add explanations.
+DO NOT add markdown.
+DO NOT add comments.
 `, htmlString)
 }
