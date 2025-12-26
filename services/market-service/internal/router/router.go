@@ -1,6 +1,8 @@
 package router
 
 import (
+	"net/http"
+
 	"github.com/crypto-platform/market-service/internal/handler"
 	"github.com/gin-gonic/gin"
 )
@@ -23,17 +25,17 @@ func SetupRouter(marketHandler *handler.MarketHandler) *gin.Engine {
 		c.Next()
 	})
 
-	// Health check
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status":  "ok",
-			"service": "market-service",
-		})
-	})
-
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
+		// Infrastructure Health Check
+		v1.GET("/health", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "ok",
+				"service": "market-service",
+			})
+		})
+
 		market := v1.Group("/market")
 		{
 			market.GET("/history", marketHandler.GetHistory)

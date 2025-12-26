@@ -18,12 +18,18 @@ import (
 	"github.com/crypto-platform/market-service/pkg/kafka"
 	ws "github.com/crypto-platform/market-service/pkg/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
 func main() {
+	// Load .env file if present
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found for market-service, using system environment variables")
+	}
+
 	// Load configuration
 	cfg := config.Load()
 

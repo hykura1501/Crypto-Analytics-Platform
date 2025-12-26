@@ -25,17 +25,14 @@ func SetupRouter(authHandler *handler.AuthHandler, jwtManager *utils.JWTManager)
 		c.Next()
 	})
 
-	// Health check
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status":  "ok",
-			"service": "auth-service",
-		})
-	})
-
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
+		// Infrastructure Health Check
+		v1.GET("/health", func(c *gin.Context) {
+			c.JSON(200, gin.H{"status": "ok", "service": "auth-service"})
+		})
+
 		// Public routes
 		auth := v1.Group("/auth")
 		{
