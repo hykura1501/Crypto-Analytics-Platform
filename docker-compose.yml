@@ -165,6 +165,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      ai-service:
+        condition: service_healthy
     networks:
       - crypto-network
     restart: unless-stopped
@@ -186,6 +188,12 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 -O /dev/null http://localhost:9001/api/v1/ai/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - crypto-network
     restart: unless-stopped

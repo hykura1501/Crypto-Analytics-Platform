@@ -99,6 +99,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	time.Sleep(30 * time.Second)
+	log.Println("Waiting for 30 seconds to initialize crawler sources...")
+
 	go startScheduler(ctx, crawlService, cfg.Crawler.IntervalMinutes)
 
 	// Initialize API Server

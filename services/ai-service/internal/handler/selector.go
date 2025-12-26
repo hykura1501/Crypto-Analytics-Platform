@@ -61,12 +61,9 @@ func (handler *SelectorHandler) Handle(ctx context.Context, msg SelectorMessage)
 
 	log.Printf("CSS selector analysis result: %v", response)
 
-	// Convert content selector array to JSON string, others are plain strings
-	contentJSON, _ := json.Marshal(response.ContentSelector)
-
 	// Update database with CSS selectors
 	query := `UPDATE sources SET summary_selector = $1, content_selector = $2, author_selector = $3, tags_selector = $4 WHERE source_id = $5`
-	_, err = handler.DB.Exec(query, response.SummarySelector, string(contentJSON), response.AuthorSelector, response.TagsSelector, msg.SourceID)
+	_, err = handler.DB.Exec(query, response.SummarySelector, response.ContentSelector, response.AuthorSelector, response.TagsSelector, msg.SourceID)
 	if err != nil {
 		log.Printf("Error updating CSS selectors for source %s: %v", msg.SourceID, err)
 		return nil, err
