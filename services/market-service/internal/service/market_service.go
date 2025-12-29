@@ -118,7 +118,9 @@ func (s *MarketService) StartRealtimeStream(ctx context.Context) error {
 				}(price)
 
 				// 2. Broadcast to WebSocket clients
-				s.wsHub.Broadcast(price)
+				// Topic format: market:{symbol}:{interval}
+				topic := fmt.Sprintf("market:%s:%s", price.Symbol, price.Interval)
+				s.wsHub.BroadcastToTopic(topic, price)
 
 				// 3. Save to database (upsert, silent)
 				go func(p *model.MarketPrice) {
@@ -129,8 +131,8 @@ func (s *MarketService) StartRealtimeStream(ctx context.Context) error {
 
 			case err := <-s.binanceWS.GetErrorChannel():
 				if err != nil {
-					log.Printf("WebSocket error: %v. Reconnecting in 5s...", err)
-					time.Sleep(5 * time.Second)
+					log.Printf("WebSocket error: %v. Reconnecting in 15s...", err)
+					time.Sleep(15 * time.Second)
 					if err := s.binanceWS.Connect(); err != nil {
 						log.Printf("Reconnection failed: %v", err)
 					}

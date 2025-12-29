@@ -9,15 +9,25 @@ import {
   CandlestickSeries,
   createSeriesMarkers,
   type ISeriesMarkersPluginApi,
+  CrosshairMode,
+  type MouseEventParams,
 } from "lightweight-charts";
 import { apiClient } from "../api/client";
 import { type MarketPrice } from "../types";
-import { WS_BASE_URL } from "../config";
+import { useWebSocket } from "../contexts/WebSocketContext";
 
 interface ChartProps {
   symbol?: string;
   interval?: string;
   selectedNewsTime?: number | null;
+}
+
+interface ChartLegendData {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  color: string;
 }
 
 export default function Chart({
@@ -28,10 +38,13 @@ export default function Chart({
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hoverLegendData, setHoverLegendData] = useState<ChartLegendData | null>(null);
+  const [lastHistoricalCandle, setLastHistoricalCandle] = useState<ChartLegendData | null>(null);
+  
+  const { subscribe, unsubscribe, lastMessage, isConnected } = useWebSocket();
 
   // Load historical data function
   const loadHistoricalData = async (sym: string, inter: string) => {
@@ -39,12 +52,13 @@ export default function Chart({
 
     setIsLoading(true);
     setError(null);
+    setLastHistoricalCandle(null); // Reset on new load
 
     try {
       const response = await apiClient.getHistory({
         symbol: sym,
         interval: inter,
-        limit: 100,
+        limit: 1000,
       });
 
       const formattedData: CandlestickData<Time>[] = response.data.map(
@@ -58,6 +72,19 @@ export default function Chart({
       );
 
       candlestickSeriesRef.current.setData(formattedData);
+      
+      // Set initial legend data from the last candle
+      if (formattedData.length > 0) {
+        const last = formattedData[formattedData.length - 1];
+        setLastHistoricalCandle({
+          open: last.open,
+          high: last.high,
+          low: last.low,
+          close: last.close,
+          color: last.close >= last.open ? "#26a69a" : "#ef5350",
+        });
+      }
+
       setIsLoading(false);
     } catch (err: unknown) {
       const errorMessage =
@@ -79,14 +106,36 @@ export default function Chart({
       layout: {
         background: { color: "#ffffff" },
         textColor: "#333",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
       },
       grid: {
-        vertLines: { color: "#f0f0f0" },
-        horzLines: { color: "#f0f0f0" },
+        vertLines: { color: "#f0f3fa" },
+        horzLines: { color: "#f0f3fa" },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          width: 1,
+          color: "#9B7DFF",
+          style: 3, // Dashed
+          labelBackgroundColor: "#9B7DFF",
+        },
+        horzLine: {
+          width: 1,
+          color: "#9B7DFF",
+          style: 3, // Dashed
+          labelBackgroundColor: "#9B7DFF",
+        },
       },
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 12,
+        barSpacing: 10,
+        borderColor: "#D1D4DC",
+      },
+      rightPriceScale: {
+        borderColor: "#D1D4DC",
       },
     });
 
@@ -105,6 +154,26 @@ export default function Chart({
 
     // Create markers plugin for the series
     markersPluginRef.current = createSeriesMarkers(candlestickSeries);
+
+    // Subscribe to crosshair move to update legend
+    chart.subscribeCrosshairMove((param: MouseEventParams) => {
+      if (
+        param.time &&
+        param.seriesData.get(candlestickSeries)
+      ) {
+        const data = param.seriesData.get(candlestickSeries) as CandlestickData;
+        setHoverLegendData({
+          open: data.open,
+          high: data.high,
+          low: data.low,
+          close: data.close,
+          color: data.close >= data.open ? "#26a69a" : "#ef5350",
+        });
+      } else {
+        // Reset hover data when mouse leaves
+        setHoverLegendData(null);
+      }
+    });
 
     // Load historical data (async, so wrap in setTimeout to avoid linter warning)
     setTimeout(() => {
@@ -129,73 +198,56 @@ export default function Chart({
     };
   }, [symbol, interval]);
 
-  // WebSocket connection for real-time updates
+  // WebSocket subscription
   useEffect(() => {
-    if (!candlestickSeriesRef.current) return;
-
-    const wsUrl = `${WS_BASE_URL}/ws/prices`;
-    const ws = new WebSocket(wsUrl);
-    let isMounted = true;
-
-    ws.onopen = () => {
-      if (isMounted) {
-        console.log("WebSocket connected");
-      }
-    };
-
-    ws.onmessage = (event) => {
-      if (!isMounted || !candlestickSeriesRef.current) return;
-
-      try {
-        const price: MarketPrice = JSON.parse(event.data);
-
-        // Only update if it matches the current symbol and interval
-        if (
-          price.symbol === symbol &&
-          price.interval === interval &&
-          candlestickSeriesRef.current
-        ) {
-          const time = (new Date(price.time).getTime() / 1000) as Time;
-          const candle: CandlestickData<Time> = {
-            time,
-            open: price.open,
-            high: price.high,
-            low: price.low,
-            close: price.close,
-          };
-
-          // Update the last candle or add new one
-          candlestickSeriesRef.current.update(candle);
-        }
-      } catch (err) {
-        console.error("Error parsing WebSocket message:", err);
-      }
-    };
-
-    ws.onerror = (error) => {
-      if (isMounted) {
-        console.error("WebSocket error:", error);
-      }
-    };
-
-    ws.onclose = () => {
-      if (isMounted) {
-        console.log("WebSocket disconnected");
-      }
-    };
-
-    wsRef.current = ws;
+    const topic = `market:${symbol}:${interval}`;
+    subscribe(topic);
 
     return () => {
-      isMounted = false;
-      if (
-        ws.readyState === WebSocket.OPEN ||
-        ws.readyState === WebSocket.CONNECTING
-      ) {
-        ws.close();
-      }
+      unsubscribe(topic);
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, subscribe, unsubscribe]);
+
+  // Handle real-time updates
+  useEffect(() => {
+    if (!lastMessage || !candlestickSeriesRef.current) return;
+
+    // Only update if it matches the current symbol and interval
+    if (
+      lastMessage.symbol === symbol &&
+      lastMessage.interval === interval
+    ) {
+      const time = (new Date(lastMessage.time).getTime() / 1000) as Time;
+      const candle: CandlestickData<Time> = {
+        time,
+        open: lastMessage.open,
+        high: lastMessage.high,
+        low: lastMessage.low,
+        close: lastMessage.close,
+      };
+
+      // Update the last candle or add new one
+      candlestickSeriesRef.current.update(candle);
+    }
+  }, [lastMessage, symbol, interval]);
+
+  // Derive current legend data
+  let currentLegendData = hoverLegendData;
+  
+  // If not hovering, use real-time data or historical data
+  if (!currentLegendData) {
+    if (lastMessage && lastMessage.symbol === symbol && lastMessage.interval === interval) {
+      currentLegendData = {
+        open: lastMessage.open,
+        high: lastMessage.high,
+        low: lastMessage.low,
+        close: lastMessage.close,
+        color: lastMessage.close >= lastMessage.open ? "#26a69a" : "#ef5350",
+      };
+    } else {
+      currentLegendData = lastHistoricalCandle;
+    }
+  }
 
   // Add marker when news is selected
   useEffect(() => {
@@ -225,7 +277,7 @@ export default function Chart({
   }, [selectedNewsTime]);
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full h-full flex flex-col relative">
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
           <div className="text-gray-600">Loading chart data...</div>
@@ -234,6 +286,24 @@ export default function Chart({
       {error && (
         <div className="p-4 bg-red-50 text-red-800 rounded mb-4">{error}</div>
       )}
+      
+      {/* TradingView-style Legend */}
+      <div className="absolute top-3 left-3 z-20 bg-white bg-opacity-90 p-2 rounded border border-gray-100 shadow-sm text-xs font-mono pointer-events-none">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="font-bold text-lg text-gray-900">{symbol}</span>
+          <span className="text-gray-500">{interval}</span>
+          <span className={`font-bold ${isConnected ? 'text-green-500' : 'text-red-500'}`}>•</span>
+        </div>
+        {currentLegendData && (
+          <div className="flex gap-3">
+            <span className="text-gray-600">O: <span className={currentLegendData.open > currentLegendData.close ? 'text-red-500' : 'text-green-500'}>{currentLegendData.open.toFixed(2)}</span></span>
+            <span className="text-gray-600">H: <span className={currentLegendData.high > currentLegendData.close ? 'text-red-500' : 'text-green-500'}>{currentLegendData.high.toFixed(2)}</span></span>
+            <span className="text-gray-600">L: <span className={currentLegendData.low > currentLegendData.close ? 'text-red-500' : 'text-green-500'}>{currentLegendData.low.toFixed(2)}</span></span>
+            <span className="text-gray-600">C: <span className={currentLegendData.close >= currentLegendData.open ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>{currentLegendData.close.toFixed(2)}</span></span>
+          </div>
+        )}
+      </div>
+
       <div ref={chartContainerRef} className="flex-1 w-full" />
     </div>
   );

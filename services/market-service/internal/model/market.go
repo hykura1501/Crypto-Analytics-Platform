@@ -9,7 +9,7 @@ import (
 type MarketPrice struct {
 	Symbol   string    `gorm:"primaryKey;size:20" json:"symbol"`
 	Time     time.Time `gorm:"primaryKey;index" json:"time"`
-	Interval string    `gorm:"size:10;index" json:"interval"` // 1m, 5m, 1h, 1d, etc.
+	Interval string    `gorm:"primaryKey;size:10;index" json:"interval"` // 1m, 5m, 1h, 1d, etc.
 	Open     float64   `gorm:"type:decimal(20,8)" json:"open"`
 	High     float64   `gorm:"type:decimal(20,8)" json:"high"`
 	Low      float64   `gorm:"type:decimal(20,8)" json:"low"`

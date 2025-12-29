@@ -52,7 +52,7 @@ func main() {
 	binanceClient := binance.NewClient(cfg.Binance.APIURL)
 
 	// Default interval for WebSocket (can be made configurable)
-	binanceWS := binance.NewWebSocketClient(cfg.Binance.WSURL, cfg.Binance.Symbols, "1m")
+	binanceWS := binance.NewWebSocketClient(cfg.Binance.WSURL, cfg.Binance.Symbols, cfg.Binance.Intervals)
 
 	kafkaProducer := kafka.NewProducer(cfg.Kafka.Broker, cfg.Kafka.Topic)
 	defer kafkaProducer.Close()

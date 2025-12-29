@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import News from './pages/News';
 import Sources from './pages/Sources';
 import SourceForm from './pages/SourceForm';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -17,6 +18,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/news"
+          element={
+            <ProtectedRoute>
+              <News />
             </ProtectedRoute>
           }
         />
