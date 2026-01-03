@@ -182,7 +182,7 @@ services:
   # AI Service (Sentiment Analysis)
   ai-service:
     build:
-      context: ./services/ai-service
+      context: ./services/ai-service-python
       dockerfile: Dockerfile
     container_name: crypto_ai_service
     depends_on:
