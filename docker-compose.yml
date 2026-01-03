@@ -202,7 +202,7 @@ services:
 
   ai-service:
     build:
-      context: ./services/ai-service
+      context: ./services/ai-service-python
       dockerfile: Dockerfile
     ports:
       - "5000:5000"

@@ -164,9 +164,10 @@ func (c *Client) ReadPump() {
 			continue
 		}
 
-		if subMsg.Action == "subscribe" {
+		switch subMsg.Action {
+		case "subscribe":
 			c.hub.subscribe <- &Subscription{Client: c, Topics: subMsg.Topics}
-		} else if subMsg.Action == "unsubscribe" {
+		case "unsubscribe":
 			c.hub.unsubscribe <- &Subscription{Client: c, Topics: subMsg.Topics}
 		}
 	}
