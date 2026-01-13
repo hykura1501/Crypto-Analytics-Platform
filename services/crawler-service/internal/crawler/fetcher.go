@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly/v2"
 )
 
@@ -60,16 +61,29 @@ func (s *Service) fetchRSS(ctx context.Context, src sourceMeta, rssURL string) [
 	return result
 }
 
-// fetchArticleContent uses Colly to get article content with dynamic selectors from DB
+// fetchArticleContent fetches article with browser rendering then extracts content using selectors
 // Returns articleContent including content, author, summary, tags
 func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleContent, error) {
 	result := &articleContent{}
+
+	// Fetch HTML with browser rendering to execute JavaScript
+	log.Printf("🌐 Fetching %s with browser rendering...", a.URL)
+	htmlContent, err := fetchHTMLWithBrowser(a.URL)
+	if err != nil {
+		log.Printf("❌ Failed to fetch HTML with browser for %s: %v", a.URL, err)
+		return nil, fmt.Errorf("failed to fetch HTML: %w", err)
+	}
+
+	// Parse HTML with goquery
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
 	var contentBuilder strings.Builder
 	var authorBuilder strings.Builder
 	var summaryBuilder strings.Builder
 	var tagsBuilder strings.Builder
-
-	c := setupBrowserLikeCollector()
 
 	// Extract content using content_selector from database
 	if src.contentSelector != "" {
@@ -78,11 +92,10 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 		// Check if selector targets paragraphs
 		if strings.Contains(selector, " p") || strings.HasSuffix(selector, "p") {
 			// Extract paragraphs from the selector
-			c.OnHTML(selector, func(e *colly.HTMLElement) {
-				e.ForEach("p", func(_ int, el *colly.HTMLElement) {
-					text := strings.TrimSpace(el.Text)
+			doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+				s.Find("p").Each(func(j int, p *goquery.Selection) {
+					text := strings.TrimSpace(p.Text())
 					if text != "" && len(text) > 20 {
-						// Avoid duplicates
 						currentContent := contentBuilder.String()
 						if len(currentContent) == 0 || !strings.Contains(currentContent, text[:min(50, len(text))]) {
 							contentBuilder.WriteString(text)
@@ -93,10 +106,9 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 			})
 		} else {
 			// Extract all text from the selector
-			c.OnHTML(selector, func(e *colly.HTMLElement) {
-				text := strings.TrimSpace(e.Text)
+			doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+				text := strings.TrimSpace(s.Text())
 				if text != "" && len(text) > 20 {
-					// Avoid duplicates
 					currentContent := contentBuilder.String()
 					if len(currentContent) == 0 || !strings.Contains(currentContent, text[:min(50, len(text))]) {
 						contentBuilder.WriteString(text)
@@ -108,9 +120,9 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 	} else {
 		// Fallback: use default "article" selector if no content_selector in DB
 		log.Printf("⚠️  No content_selector for %s, using default 'article'", src.name)
-		c.OnHTML("article", func(e *colly.HTMLElement) {
-			e.ForEach("p", func(_ int, el *colly.HTMLElement) {
-				text := strings.TrimSpace(el.Text)
+		doc.Find("article").Each(func(i int, s *goquery.Selection) {
+			s.Find("p").Each(func(j int, p *goquery.Selection) {
+				text := strings.TrimSpace(p.Text())
 				if text != "" && len(text) > 20 {
 					currentContent := contentBuilder.String()
 					if len(currentContent) == 0 || !strings.Contains(currentContent, text[:min(50, len(text))]) {
@@ -124,8 +136,8 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 
 	// Extract author using author_selector from database
 	if src.authorSelector != "" {
-		c.OnHTML(src.authorSelector, func(e *colly.HTMLElement) {
-			authorText := strings.TrimSpace(e.Text)
+		doc.Find(src.authorSelector).Each(func(i int, s *goquery.Selection) {
+			authorText := strings.TrimSpace(s.Text())
 			if authorText != "" && authorBuilder.Len() == 0 {
 				authorBuilder.WriteString(authorText)
 			}
@@ -134,8 +146,8 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 
 	// Extract summary using summary_selector from database
 	if src.summarySelector != "" {
-		c.OnHTML(src.summarySelector, func(e *colly.HTMLElement) {
-			summaryText := strings.TrimSpace(e.Text)
+		doc.Find(src.summarySelector).Each(func(i int, s *goquery.Selection) {
+			summaryText := strings.TrimSpace(s.Text())
 			if summaryText != "" && summaryBuilder.Len() == 0 {
 				summaryBuilder.WriteString(summaryText)
 			}
@@ -144,11 +156,11 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 
 	// Extract tags using tags_selector from database
 	if src.tagsSelector != "" {
-		c.OnHTML(src.tagsSelector, func(e *colly.HTMLElement) {
+		doc.Find(src.tagsSelector).Each(func(i int, s *goquery.Selection) {
 			// First try to extract from child elements (a, span, li) which are common for tags
 			hasChildTags := false
-			e.ForEach("a, span, li", func(_ int, el *colly.HTMLElement) {
-				tagText := strings.TrimSpace(el.Text)
+			s.Find("a, span, li").Each(func(j int, tag *goquery.Selection) {
+				tagText := strings.TrimSpace(tag.Text())
 				if tagText != "" {
 					currentTags := tagsBuilder.String()
 					if !strings.Contains(currentTags, tagText) {
@@ -163,7 +175,7 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 
 			// If no child tags found, use the element's text directly
 			if !hasChildTags {
-				tagText := strings.TrimSpace(e.Text)
+				tagText := strings.TrimSpace(s.Text())
 				if tagText != "" {
 					currentTags := tagsBuilder.String()
 					if !strings.Contains(currentTags, tagText) {
@@ -175,10 +187,6 @@ func (s *Service) fetchArticleContent(a rssArticle, src sourceMeta) (*articleCon
 				}
 			}
 		})
-	}
-
-	if err := c.Visit(a.URL); err != nil {
-		return nil, fmt.Errorf("failed to visit URL: %w", err)
 	}
 
 	result.content = strings.TrimSpace(contentBuilder.String())

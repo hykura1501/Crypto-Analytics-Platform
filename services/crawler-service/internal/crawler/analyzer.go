@@ -56,24 +56,10 @@ func (s *Service) AnalyzeSource(sourceID, rssURL string) error {
 		}
 	}
 
-	// Fetch HTML from first 2 articles and send for CSS selector analysis
+	// Fetch HTML from first 2 articles using browser automation for JavaScript rendering
 	if s.producer != nil && len(articleLinks) > 0 {
-		htmlCollector := setupBrowserLikeCollector()
-
 		var htmlContents []string
-		var fetchedCount int
 		const maxArticles = 2
-
-		htmlCollector.OnResponse(func(r *colly.Response) {
-			htmlContent := string(r.Body)
-			if htmlContent != "" {
-				// Remove script and style tags content
-				cleanedHTML := removeScriptAndStyleTags(htmlContent)
-				htmlContents = append(htmlContents, cleanedHTML)
-				fetchedCount++
-				log.Printf("✅ Fetched HTML from article %d/%d: %s", fetchedCount, maxArticles, r.Request.URL)
-			}
-		})
 
 		// Fetch up to 2 articles
 		articlesToFetch := len(articleLinks)
@@ -81,11 +67,19 @@ func (s *Service) AnalyzeSource(sourceID, rssURL string) error {
 			articlesToFetch = maxArticles
 		}
 
-		log.Printf("Fetching %d article(s) HTML for CSS selector analysis", articlesToFetch)
+		log.Printf("Fetching %d article(s) HTML with browser rendering for CSS selector analysis", articlesToFetch)
 		for i := 0; i < articlesToFetch; i++ {
-			if err := htmlCollector.Visit(articleLinks[i]); err != nil {
+			// Use browser automation to fetch rendered HTML
+			htmlContent, err := fetchHTMLWithBrowser(articleLinks[i])
+			if err != nil {
 				log.Printf("Error fetching article HTML from %s: %v", articleLinks[i], err)
+				continue
 			}
+
+			// Remove script and style tags content
+			cleanedHTML := removeScriptAndStyleTags(htmlContent)
+			htmlContents = append(htmlContents, cleanedHTML)
+			log.Printf("✅ Fetched and cleaned HTML from article %d/%d: %s", i+1, maxArticles, articleLinks[i])
 		}
 
 		if len(htmlContents) > 0 {

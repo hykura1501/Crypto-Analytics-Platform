@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import {
   createChart,
   type IChartApi,
@@ -41,11 +41,19 @@ export default function Chart({
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hoverLegendData, setHoverLegendData] = useState<ChartLegendData | null>(null);
-  const [lastHistoricalCandle, setLastHistoricalCandle] = useState<ChartLegendData | null>(null);
-  
-  const { subscribe, unsubscribe, lastMessage, isConnected } = useWebSocket();
+  const [hoverLegendData, setHoverLegendData] =
+    useState<ChartLegendData | null>(null);
+  const [lastHistoricalCandle, setLastHistoricalCandle] =
+    useState<ChartLegendData | null>(null);
 
+  const { subscribe, unsubscribe, lastMessage, getLastMessage, isConnected } =
+    useWebSocket();
+
+  // Derive current topic message instead of storing in state
+  const currentTopicMessage = useMemo(() => {
+    const topic = `market:${symbol}:${interval}`;
+    return getLastMessage(topic);
+  }, [symbol, interval, lastMessage, getLastMessage]);
   // Load historical data function
   const loadHistoricalData = async (sym: string, inter: string) => {
     if (!candlestickSeriesRef.current) return;
@@ -72,7 +80,7 @@ export default function Chart({
       );
 
       candlestickSeriesRef.current.setData(formattedData);
-      
+
       // Set initial legend data from the last candle
       if (formattedData.length > 0) {
         const last = formattedData[formattedData.length - 1];
@@ -106,7 +114,8 @@ export default function Chart({
       layout: {
         background: { color: "#ffffff" },
         textColor: "#333",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        fontFamily:
+          "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
       },
       grid: {
         vertLines: { color: "#f0f3fa" },
@@ -157,10 +166,7 @@ export default function Chart({
 
     // Subscribe to crosshair move to update legend
     chart.subscribeCrosshairMove((param: MouseEventParams) => {
-      if (
-        param.time &&
-        param.seriesData.get(candlestickSeries)
-      ) {
+      if (param.time && param.seriesData.get(candlestickSeries)) {
         const data = param.seriesData.get(candlestickSeries) as CandlestickData;
         setHoverLegendData({
           open: data.open,
@@ -210,39 +216,36 @@ export default function Chart({
 
   // Handle real-time updates
   useEffect(() => {
-    if (!lastMessage || !candlestickSeriesRef.current) return;
+    if (!candlestickSeriesRef.current || !currentTopicMessage) return;
 
-    // Only update if it matches the current symbol and interval
-    if (
-      lastMessage.symbol === symbol &&
-      lastMessage.interval === interval
-    ) {
-      const time = (new Date(lastMessage.time).getTime() / 1000) as Time;
-      const candle: CandlestickData<Time> = {
-        time,
-        open: lastMessage.open,
-        high: lastMessage.high,
-        low: lastMessage.low,
-        close: lastMessage.close,
-      };
+    const time = (new Date(currentTopicMessage.time).getTime() / 1000) as Time;
+    const candle: CandlestickData<Time> = {
+      time,
+      open: currentTopicMessage.open,
+      high: currentTopicMessage.high,
+      low: currentTopicMessage.low,
+      close: currentTopicMessage.close,
+    };
 
-      // Update the last candle or add new one
-      candlestickSeriesRef.current.update(candle);
-    }
-  }, [lastMessage, symbol, interval]);
+    // Update the last candle or add new one
+    candlestickSeriesRef.current.update(candle);
+  }, [currentTopicMessage]);
 
   // Derive current legend data
   let currentLegendData = hoverLegendData;
-  
+
   // If not hovering, use real-time data or historical data
   if (!currentLegendData) {
-    if (lastMessage && lastMessage.symbol === symbol && lastMessage.interval === interval) {
+    if (currentTopicMessage) {
       currentLegendData = {
-        open: lastMessage.open,
-        high: lastMessage.high,
-        low: lastMessage.low,
-        close: lastMessage.close,
-        color: lastMessage.close >= lastMessage.open ? "#26a69a" : "#ef5350",
+        open: currentTopicMessage.open,
+        high: currentTopicMessage.high,
+        low: currentTopicMessage.low,
+        close: currentTopicMessage.close,
+        color:
+          currentTopicMessage.close >= currentTopicMessage.open
+            ? "#26a69a"
+            : "#ef5350",
       };
     } else {
       currentLegendData = lastHistoricalCandle;
@@ -286,20 +289,70 @@ export default function Chart({
       {error && (
         <div className="p-4 bg-red-50 text-red-800 rounded mb-4">{error}</div>
       )}
-      
+
       {/* TradingView-style Legend */}
       <div className="absolute top-3 left-3 z-20 bg-white bg-opacity-90 p-2 rounded border border-gray-100 shadow-sm text-xs font-mono pointer-events-none">
         <div className="flex items-center gap-2 mb-1">
           <span className="font-bold text-lg text-gray-900">{symbol}</span>
           <span className="text-gray-500">{interval}</span>
-          <span className={`font-bold ${isConnected ? 'text-green-500' : 'text-red-500'}`}>•</span>
+          <span
+            className={`font-bold ${
+              isConnected ? "text-green-500" : "text-red-500"
+            }`}
+          >
+            •
+          </span>
         </div>
         {currentLegendData && (
           <div className="flex gap-3">
-            <span className="text-gray-600">O: <span className={currentLegendData.open > currentLegendData.close ? 'text-red-500' : 'text-green-500'}>{currentLegendData.open.toFixed(2)}</span></span>
-            <span className="text-gray-600">H: <span className={currentLegendData.high > currentLegendData.close ? 'text-red-500' : 'text-green-500'}>{currentLegendData.high.toFixed(2)}</span></span>
-            <span className="text-gray-600">L: <span className={currentLegendData.low > currentLegendData.close ? 'text-red-500' : 'text-green-500'}>{currentLegendData.low.toFixed(2)}</span></span>
-            <span className="text-gray-600">C: <span className={currentLegendData.close >= currentLegendData.open ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>{currentLegendData.close.toFixed(2)}</span></span>
+            <span className="text-gray-600">
+              O:{" "}
+              <span
+                className={
+                  currentLegendData.open > currentLegendData.close
+                    ? "text-red-500"
+                    : "text-green-500"
+                }
+              >
+                {currentLegendData.open.toFixed(2)}
+              </span>
+            </span>
+            <span className="text-gray-600">
+              H:{" "}
+              <span
+                className={
+                  currentLegendData.high > currentLegendData.close
+                    ? "text-red-500"
+                    : "text-green-500"
+                }
+              >
+                {currentLegendData.high.toFixed(2)}
+              </span>
+            </span>
+            <span className="text-gray-600">
+              L:{" "}
+              <span
+                className={
+                  currentLegendData.low > currentLegendData.close
+                    ? "text-red-500"
+                    : "text-green-500"
+                }
+              >
+                {currentLegendData.low.toFixed(2)}
+              </span>
+            </span>
+            <span className="text-gray-600">
+              C:{" "}
+              <span
+                className={
+                  currentLegendData.close >= currentLegendData.open
+                    ? "text-green-600 font-bold"
+                    : "text-red-600 font-bold"
+                }
+              >
+                {currentLegendData.close.toFixed(2)}
+              </span>
+            </span>
           </div>
         )}
       </div>
