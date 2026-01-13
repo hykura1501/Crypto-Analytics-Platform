@@ -13,6 +13,7 @@ interface WebSocketContextType {
   subscribe: (topic: string) => void;
   unsubscribe: (topic: string) => void;
   lastMessage: MarketPrice | null;
+  getLastMessage: (topic: string) => MarketPrice | null;
   isConnected: boolean;
 }
 
@@ -34,6 +35,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
   const [lastMessage, setLastMessage] = useState<MarketPrice | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const subscriptionsRef = useRef<Set<string>>(new Set());
+  const messagesRef = useRef<Map<string, MarketPrice>>(new Map());
 
   useEffect(() => {
     const connect = () => {
@@ -59,6 +61,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          // Store message by topic
+          const topic = `market:${data.symbol}:${data.interval}`;
+          messagesRef.current.set(topic, data);
           setLastMessage(data);
         } catch (err) {
           console.error("Error parsing WebSocket message:", err);
@@ -113,9 +118,13 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const getLastMessage = useCallback((topic: string) => {
+    return messagesRef.current.get(topic) || null;
+  }, []);
+
   return (
     <WebSocketContext.Provider
-      value={{ subscribe, unsubscribe, lastMessage, isConnected }}
+      value={{ subscribe, unsubscribe, lastMessage, getLastMessage, isConnected }}
     >
       {children}
     </WebSocketContext.Provider>

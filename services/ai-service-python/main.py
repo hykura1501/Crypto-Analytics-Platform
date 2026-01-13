@@ -76,6 +76,8 @@ def main():
 
         topic = msg.topic()
         value = msg.value().decode('utf-8')
+        
+        logging.info(f"Received message from topic: {topic}")
 
         if topic == "news_new_article":
             news_handler.handle(value)
