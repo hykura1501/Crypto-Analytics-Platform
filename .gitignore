@@ -105,3 +105,4 @@ dist-ssr
 *.sw?
 
 .venv
+ignore
