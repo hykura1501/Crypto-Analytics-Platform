@@ -1,0 +1,744 @@
+% flowcharts.tex - Các sơ đồ kiến trúc hệ thống
+% Dựa trên source code thực tế của dự án
+% Điều chỉnh khoảng cách và màu sắc theo mẫu
+
+% ==============================================================================
+% SƠ ĐỒ 1: KIẾN TRÚC TỔNG QUAN HỆ THỐNG MICROSERVICES
+% ==============================================================================
+\section{Sơ đồ kiến trúc tổng quan}
+\label{sec:overall-architecture}
+
+Sơ đồ \ref{fig:system-architecture} thể hiện kiến trúc tổng quan của hệ thống Crypto Analytics Platform, bao gồm các thành phần chính: Frontend (React), Backend (Golang + Gin), Crawler Service, AI Service, và các cơ sở dữ liệu PostgreSQL, Redis.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.5cm,
+    box/.style={rectangle, draw, minimum width=3cm, minimum height=1cm, align=center, font=\small, rounded corners}
+]
+
+% User
+\node[box, fill=green!30] (user) {Người dùng\\(Free/VIP)};
+
+% Frontend
+\node[box, fill=green!20, below=1.5cm of user] (fe) {Frontend\\React + Vite\\Port: 5173};
+
+% Backend
+\node[box, fill=orange!30, below=1.5cm of fe] (api) {Backend API\\Golang + Gin\\Port: 8080};
+\node[box, fill=orange!20, right=1.5cm of api] (ws) {WebSocket\\Hub};
+
+% Services
+\node[box, fill=purple!30, below left=2cm and 1cm of api] (crawler) {Crawler\\Service\\Python};
+\node[box, fill=red!30, below right=2cm and 1cm of api] (ai) {AI Analysis\\Service\\Port: 5000};
+
+% Database
+\node[box, fill=gray!30, below=4cm of api] (db) {PostgreSQL\\cryptodb\\Port: 5432};
+\node[box, fill=pink!30, right=1.5cm of db] (redis) {Redis\\Cache\\Port: 6379};
+
+% External
+\node[box, fill=yellow!30, right=1.5cm of ws] (binance) {Binance\\API};
+\node[box, fill=cyan!30, left=1.5cm of crawler] (news) {News\\Sources};
+
+% Arrows
+\draw[->, thick] (user) -- (fe);
+\draw[<->, thick] (fe) -- (api);
+\draw[<->, thick] (fe) -| (ws);
+\draw[->, thick] (api) -- (db);
+\draw[<->, thick] (api) -- (redis);
+\draw[->, thick] (ws) -- (binance);
+\draw[->, thick] (news) -- (crawler);
+\draw[->, thick] (crawler) -- (db);
+\draw[->, thick] (ai) -- (db);
+\draw[<->, thick] (api) -- (ai);
+
+% Layer labels
+\node[font=\footnotesize, gray, left=0.5cm of user] {Presentation};
+\node[font=\footnotesize, gray, left=0.5cm of api] {Application};
+\node[font=\footnotesize, gray, left=0.5cm of crawler] {Service};
+\node[font=\footnotesize, gray, left=0.5cm of db] {Data};
+
+\end{tikzpicture}
+\caption{Kiến trúc tổng quan hệ thống Crypto Analytics Platform}
+\label{fig:system-architecture}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 2: WEBSOCKET HUB PATTERN - XỬ LÝ 1000+ CLIENTS
+% ==============================================================================
+\section{Sơ đồ WebSocket Hub Pattern}
+\label{sec:websocket-hub-flow}
+
+Sơ đồ \ref{fig:websocket-hub} mô tả chi tiết luồng xử lý của WebSocket Hub pattern được triển khai trong file \texttt{backend/internal/websocket/hub.go}. Pattern này cho phép hệ thống xử lý đồng thời 1000+ clients với hiệu suất cao.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.5cm,
+    box/.style={rectangle, draw, minimum width=2.8cm, minimum height=0.9cm, align=center, font=\small, rounded corners},
+    decision/.style={diamond, draw, minimum width=2cm, align=center, font=\small, aspect=2},
+    channel/.style={ellipse, draw, minimum width=2.5cm, align=center, font=\small}
+]
+
+% Hub struct
+\node[box, fill=green!30] (hub) {Hub Struct\\clients map[string]map};
+
+% Channels
+\node[channel, fill=blue!20, below left=1.8cm and 2cm of hub] (regchan) {Register\\Channel};
+\node[channel, fill=orange!20, below=1.8cm of hub] (unregchan) {Unregister\\Channel};
+\node[channel, fill=purple!20, below right=1.8cm and 2cm of hub] (broadcastchan) {Broadcast\\Channel};
+
+% Select Loop
+\node[decision, fill=yellow!30, below=3.5cm of hub] (select) {select\\loop};
+
+% Processes
+\node[box, fill=blue!30, below left=2cm and 2cm of select] (register) {Register Client\\clients[pair][client]=true};
+\node[box, fill=orange!30, below=2cm of select] (unregister) {Unregister\\delete(clients, client)\\close(Send)};
+\node[box, fill=purple!30, below right=2cm and 2cm of select] (broadcast) {Broadcast\\json.Marshal\\client.Send <- data};
+
+% Client struct
+\node[box, fill=cyan!30, left=1.5cm of regchan] (client) {Client\\Hub, Pair\\Conn, Send};
+
+% Goroutines
+\node[box, fill=green!20, below=1.5cm of register] (readpump) {ReadPump\\SetPongHandler\\ReadMessage};
+\node[box, fill=pink!30, below=1.5cm of unregister] (writepump) {WritePump\\ticker(54s)\\WriteMessage};
+
+% WebSocket Connection
+\node[box, fill=gray!30, below=1.5cm of broadcast] (wsconn) {WSConn\\gorilla/websocket};
+
+% Arrows
+\draw[->, thick] (client) -- (regchan);
+\draw[->, thick] (hub) -- (regchan);
+\draw[->, thick] (hub) -- (unregchan);
+\draw[->, thick] (hub) -- (broadcastchan);
+
+\draw[->, thick] (regchan) -- (select);
+\draw[->, thick] (unregchan) -- (select);
+\draw[->, thick] (broadcastchan) -- (select);
+
+\draw[->, thick] (select) -- node[left, font=\footnotesize] {case} (register);
+\draw[->, thick] (select) -- (unregister);
+\draw[->, thick] (select) -- node[right, font=\footnotesize] {case} (broadcast);
+
+\draw[->, thick] (register) -- (readpump);
+\draw[->, thick] (unregister) -- (writepump);
+\draw[->, thick] (broadcast) -- (wsconn);
+
+% Config labels
+\node[font=\footnotesize, align=left, fill=white, draw=gray!50, rounded corners] at (6, -4) {
+writeWait: 10s\\
+pongWait: 60s\\
+pingPeriod: 54s\\
+maxMsgSize: 512KB
+};
+
+\end{tikzpicture}
+\caption{WebSocket Hub Pattern - Xử lý đồng thời 1000+ clients}
+\label{fig:websocket-hub}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 3: LUỒNG XỬ LÝ WEBSOCKET CLIENT CONNECTION
+% ==============================================================================
+\section{Luồng kết nối WebSocket Client}
+\label{sec:websocket-client-flow}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm,
+    startstop/.style={ellipse, draw, minimum width=2.5cm, align=center, font=\small},
+    box/.style={rectangle, draw, minimum width=3.5cm, minimum height=0.9cm, align=center, font=\small, rounded corners},
+    decision/.style={diamond, draw, minimum width=2cm, align=center, font=\small, aspect=2}
+]
+
+% Start
+\node[startstop, fill=green!30] (start) {Client Connect};
+
+% Frontend useWebSocket
+\node[box, fill=green!20, below=1.2cm of start] (usews) {useWebSocket(url)\\new WebSocket()};
+
+% Backend HandleWebSocket
+\node[box, fill=orange!30, below=1.2cm of usews] (upgrade) {upgrader.Upgrade()\\CheckOrigin: true};
+
+% Create Client
+\node[box, fill=blue!30, below=1.2cm of upgrade] (createclient) {Create Client\\Hub, Pair, Conn, Send};
+
+% Register
+\node[box, fill=purple!30, below=1.2cm of createclient] (register) {hub.Register <- client};
+
+% Fork goroutines
+\node[box, fill=cyan!30, below=1.2cm of register] (goroutine) {go ReadPump()\\go WritePump()};
+
+% ReadPump loop
+\node[decision, fill=yellow!30, below left=1.5cm and 2.5cm of goroutine] (readloop) {Read\\Message?};
+\node[box, fill=blue!20, below=1.5cm of readloop] (pong) {SetPongHandler\\ResetDeadline};
+
+% WritePump loop
+\node[decision, fill=yellow!30, below right=1.5cm and 2.5cm of goroutine] (writeloop) {Send\\Channel?};
+\node[box, fill=orange!20, below=1.5cm of writeloop] (write) {WriteJSON\\to client};
+\node[box, fill=pink!30, below=1.2cm of write] (ping) {Ping every 54s\\ticker.C};
+
+% Close
+\node[box, fill=red!30, below=3cm of goroutine] (close) {hub.Unregister <- client\\conn.Close()};
+\node[startstop, fill=red!20, below=1.2cm of close] (end) {Disconnected};
+
+% Arrows
+\draw[->, thick] (start) -- (usews);
+\draw[->, thick] (usews) -- (upgrade);
+\draw[->, thick] (upgrade) -- (createclient);
+\draw[->, thick] (createclient) -- (register);
+\draw[->, thick] (register) -- (goroutine);
+\draw[->, thick] (goroutine) -| (readloop);
+\draw[->, thick] (goroutine) -| (writeloop);
+
+\draw[->, thick] (readloop) -- node[left, font=\footnotesize] {yes} (pong);
+\draw[->, thick] (pong.west) -- ++(-0.8, 0) |- (readloop.west);
+\draw[->, thick] (readloop.south) -- ++(0, -0.5) -- ++(-2, 0) node[above, font=\footnotesize] {error} |- (close.west);
+
+\draw[->, thick] (writeloop) -- node[right, font=\footnotesize] {data} (write);
+\draw[->, thick] (write.east) -- ++(0.8, 0) |- (writeloop.east);
+\draw[->, thick] (writeloop.south) -- ++(0, -0.5) -- (ping);
+\draw[->, thick] (ping.east) -- ++(1, 0) |- (writeloop.east);
+
+\draw[->, thick] (close) -- (end);
+
+\end{tikzpicture}
+\caption{Luồng kết nối và xử lý WebSocket Client}
+\label{fig:websocket-client-flow}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 4: CRAWLER SERVICE FLOW - THU THẬP TIN TỨC
+% ==============================================================================
+\section{Sơ đồ Crawler Service}
+\label{sec:crawler-flow}
+
+Sơ đồ \ref{fig:crawler-flow} mô tả luồng hoạt động của Crawler Service, được triển khai trong \texttt{services/crawler/main.py}. Service này tự động thu thập tin tức mỗi 30 phút với khả năng tự học cấu trúc HTML và retry với exponential backoff.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.85\textwidth}{!}{%
+\begin{tikzpicture}[
+    node distance=1.0cm and 1.5cm,
+    startstop/.style={ellipse, draw, minimum width=1.4cm, align=center, font=\scriptsize},
+    box/.style={rectangle, draw, minimum width=1.6cm, minimum height=0.6cm, align=center, font=\scriptsize, rounded corners},
+    decision/.style={diamond, draw, minimum width=1.2cm, aspect=1.8, align=center, font=\scriptsize, inner sep=0pt},
+    line/.style={draw, ->, >=stealth, thick}
+]
+
+% Main Spine (Vertical)
+\node[startstop, fill=green!30] (start) {Schedule\\30min};
+\node[box, fill=blue!30, below=0.8cm of start] (getsrc) {Get News\\Sources};
+\node[decision, fill=yellow!30, below=0.8cm of getsrc] (loopsrc) {Have\\Source?};
+
+\node[box, fill=orange!30, below=1.2cm of loopsrc] (fetch) {requests.get()};
+\node[decision, fill=yellow!30, below=0.8cm of fetch] (error) {Error?};
+
+\node[box, fill=purple!30, below=1.0cm of error] (learn) {learn\_structure()};
+\node[box, fill=blue!20, below=0.8cm of learn] (soup) {soup.select()};
+
+\node[decision, fill=yellow!30, below=0.8cm of soup] (loopart) {Have\\Article?};
+\node[decision, fill=yellow!30, below=1.2cm of loopart] (exists) {In DB?};
+
+% Side Branches (Right)
+\node[box, fill=red!30, right=2cm of fetch] (backoff) {Backoff\\$2^n$s};
+\node[box, fill=cyan!30, right=2cm of exists] (extract) {extract\_news()};
+\node[box, fill=gray!30, below=0.8cm of extract] (save) {INSERT\\news};
+
+% End Node (Left of Loop)
+\node[startstop, fill=red!20, left=2.5cm of loopsrc] (end) {Complete};
+
+% Connections
+
+% 1. Start sequence
+\draw[line] (start) -- (getsrc);
+\draw[line] (getsrc) -- (loopsrc);
+
+% 2. Source Loop -> Fetch
+\draw[line] (loopsrc) -- node[right, font=\tiny] {yes} (fetch);
+
+% 3. Fetch -> Error Handling
+\draw[line] (fetch) -- (error);
+\draw[line] (error) -- node[above, font=\tiny] {yes} (backoff);
+\draw[line] (backoff) |- (fetch.east); % Loop back to fetch
+\draw[line] (error) -- node[right, font=\tiny] {no} (learn);
+
+% 4. Processing
+\draw[line] (learn) -- (soup);
+\draw[line] (soup) -- (loopart);
+
+% 5. Article Loop -> DB Check
+\draw[line] (loopart) -- node[right, font=\tiny] {yes} (exists);
+
+% 6. Exists Logic
+\draw[line] (exists) -- node[above, font=\tiny] {no} (extract);
+\draw[line] (extract) -- (save);
+
+% 7. Article Loop Backs
+% Loop back if Exists=Yes (skip extract)
+\draw[line] (exists.west) -- ++(-0.8, 0) |- node[near start, left, font=\tiny] {yes} (loopart.west);
+% Loop back after Save (next article)
+\draw[line] (save.east) -- ++(0.5, 0) |- (loopart.east);
+
+% 8. Source Loop Back
+% When articles done -> go to next source
+\draw[line] (loopart.west) -- ++(-1.8, 0) |- node[near start, above, font=\tiny] {no/done} (loopsrc.west);
+
+% 9. End
+\draw[line] (loopsrc) -- node[above, font=\tiny] {no/done} (end);
+
+\end{tikzpicture}%
+}
+\caption{Luồng hoạt động Crawler Service (Optimized Layout)}
+\label{fig:crawler-flow}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 5: AI SERVICE FLOW - PHÂN TÍCH VÀ DỰ ĐOÁN
+% ==============================================================================
+\section{Sơ đồ AI Analysis Service}
+\label{sec:ai-service-flow}
+
+Sơ đồ \ref{fig:ai-flow} mô tả pipeline phân tích AI của hệ thống, được triển khai trong \texttt{services/ai-service/main.py}. Service này kết hợp VADER và TextBlob để phân tích sentiment, sau đó dự đoán xu hướng giá UP/DOWN.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.95\textwidth}{!}{%
+\begin{tikzpicture}[
+    node distance=0.8cm,
+    startstop/.style={ellipse, draw, minimum width=1.8cm, align=center, font=\footnotesize},
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.65cm, align=center, font=\footnotesize, rounded corners},
+    decision/.style={diamond, draw, minimum width=1.2cm, align=center, font=\footnotesize, aspect=1.8},
+    data/.style={rectangle, draw, minimum width=2cm, minimum height=0.55cm, align=center, font=\footnotesize}
+]
+
+% Input
+\node[startstop, fill=green!30] (start) {News Input};
+
+% Get news
+\node[box, fill=blue!30, below=0.7cm of start] (getnews) {SELECT FROM news\\WHERE sentiment IS NULL};
+
+% VADER Analysis
+\node[box, fill=purple!30, below left=0.9cm and 1.2cm of getnews] (vader) {VADER\\polarity\_scores};
+
+% TextBlob Analysis
+\node[box, fill=orange!30, below right=0.9cm and 1.2cm of getnews] (textblob) {TextBlob\\polarity};
+
+% Combine scores
+\node[box, fill=cyan!30, below=2.2cm of getnews] (combine) {Combined =\\(VADER+TextBlob)/2};
+
+% Classify
+\node[decision, fill=yellow!30, below=0.8cm of combine] (classify) {Score?};
+
+% Labels
+\node[data, fill=green!30, below left=1cm and 1.5cm of classify] (positive) {positive\\$\geq$0.05};
+\node[data, fill=gray!30, below=1cm of classify] (neutral) {neutral};
+\node[data, fill=red!30, below right=1cm and 1.5cm of classify] (negative) {negative\\$\leq$-0.05};
+
+% Update DB
+\node[box, fill=blue!20, below=2.5cm of classify] (update) {UPDATE news SET\\sentiment\_score};
+
+% Align with price
+\node[box, fill=orange!20, below=0.7cm of update] (align) {align\_news\_with\_price()};
+
+% Predict trend
+\node[box, fill=purple!20, below=0.7cm of align] (predict) {predict\_trend()};
+
+% Decision
+\node[decision, fill=yellow!30, below=0.8cm of predict] (predictdec) {Predict?};
+
+% Outputs
+\node[data, fill=green!40, below left=1cm and 1.5cm of predictdec] (up) {UP\\0.4-0.9};
+\node[data, fill=gray!30, below=1cm of predictdec] (neutralout) {NEUTRAL\\0.5};
+\node[data, fill=red!40, below right=1cm and 1.5cm of predictdec] (down) {DOWN\\0.4-0.9};
+
+% Response
+\node[startstop, fill=pink!30, below=2.5cm of predictdec] (response) {Response JSON};
+
+% Arrows
+\draw[->, thick] (start) -- (getnews);
+\draw[->, thick] (getnews) -| (vader);
+\draw[->, thick] (getnews) -| (textblob);
+\draw[->, thick] (vader) |- (combine);
+\draw[->, thick] (textblob) |- (combine);
+\draw[->, thick] (combine) -- (classify);
+
+\draw[->, thick] (classify) -| node[above, font=\tiny, pos=0.3] {$\geq$0.05} (positive);
+\draw[->, thick] (classify) -- (neutral);
+\draw[->, thick] (classify) -| node[above, font=\tiny, pos=0.3] {$\leq$-0.05} (negative);
+
+\draw[->, thick] (positive) |- (update);
+\draw[->, thick] (neutral) -- (update);
+\draw[->, thick] (negative) |- (update);
+
+\draw[->, thick] (update) -- (align);
+\draw[->, thick] (align) -- (predict);
+\draw[->, thick] (predict) -- (predictdec);
+
+\draw[->, thick] (predictdec) -| node[above, font=\tiny, pos=0.3] {$>$0.1} (up);
+\draw[->, thick] (predictdec) -- (neutralout);
+\draw[->, thick] (predictdec) -| node[above, font=\tiny, pos=0.3] {$<$-0.1} (down);
+
+\draw[->, thick] (up) |- (response);
+\draw[->, thick] (neutralout) -- (response);
+\draw[->, thick] (down) |- (response);
+
+\end{tikzpicture}%
+}
+\caption{AI Analysis Pipeline - Sentiment Analysis và Trend Prediction}
+\label{fig:ai-flow}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 6: REST API FLOW VỚI REDIS CACHING
+% ==============================================================================
+\section{Sơ đồ REST API với Redis Caching}
+\label{sec:api-cache-flow}
+
+Sơ đồ \ref{fig:api-cache-flow} mô tả luồng xử lý API request với Redis caching, được triển khai trong \texttt{backend/internal/handlers/handler.go}. Pattern này giúp giảm tải cho Binance API và tăng tốc độ response.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.3cm,
+    startstop/.style={ellipse, draw, minimum width=2.5cm, align=center, font=\small},
+    box/.style={rectangle, draw, minimum width=3.5cm, minimum height=0.9cm, align=center, font=\small, rounded corners},
+    decision/.style={diamond, draw, minimum width=2cm, align=center, font=\small, aspect=2},
+    cache/.style={rectangle, draw, minimum width=3cm, minimum height=0.8cm, align=center, font=\small}
+]
+
+% Client request
+\node[startstop, fill=green!30] (request) {GET /api/v1/\\price/:pair};
+
+% Handler
+\node[box, fill=blue!30, below=1.3cm of request] (handler) {GetCurrentPrice()\\pair = c.Param("pair")};
+
+% Check cache
+\node[cache, fill=pink!30, below=1.3cm of handler] (cachecheck) {Redis GET\\key = "price:" + pair};
+
+% Decision cache hit
+\node[decision, fill=yellow!30, below=1.3cm of cachecheck] (cachehit) {Cache\\Hit?};
+
+% Return cached
+\node[box, fill=green!20, below left=1.5cm and 2.5cm of cachehit] (returncached) {json.Unmarshal\\Return cached data};
+
+% Fetch from Binance
+\node[box, fill=orange!30, below right=1.5cm and 2.5cm of cachehit] (binance) {BinanceService\\GetCurrentPrice(pair)};
+
+% Store in cache
+\node[cache, fill=pink!20, below=1.3cm of binance] (cachestore) {Redis SET\\TTL = 1 second};
+
+% Prepare response
+\node[box, fill=cyan!30, below=4cm of cachehit] (prepare) {priceData = \{\\pair, price, timestamp\}};
+
+% Response
+\node[startstop, fill=gray!30, below=1.3cm of prepare] (response) {JSON Response\\c.JSON(200, data)};
+
+% Arrows
+\draw[->, thick] (request) -- (handler);
+\draw[->, thick] (handler) -- (cachecheck);
+\draw[->, thick] (cachecheck) -- (cachehit);
+\draw[->, thick] (cachehit) -| node[above, font=\footnotesize] {yes} (returncached);
+\draw[->, thick] (cachehit) -| node[above, font=\footnotesize] {no} (binance);
+\draw[->, thick] (binance) -- (cachestore);
+\draw[->, thick] (returncached) |- (response);
+\draw[->, thick] (cachestore) |- (prepare);
+\draw[->, thick] (prepare) -- (response);
+
+% Labels
+\node[font=\footnotesize, align=left, fill=white, draw=gray!50, rounded corners] at (5.5, -3) {
+Cache-Aside\\Pattern\\TTL: 1s
+};
+
+\end{tikzpicture}
+\caption{REST API Flow với Redis Cache-Aside Pattern}
+\label{fig:api-cache-flow}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 7: FRONTEND REACT COMPONENT FLOW
+% ==============================================================================
+\section{Sơ đồ Frontend React Component}
+\label{sec:frontend-flow}
+
+Sơ đồ \ref{fig:frontend-flow} mô tả cấu trúc components của Frontend React, với focus vào TradingChart component sử dụng Lightweight Charts và WebSocket hook cho real-time updates.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.3cm,
+    box/.style={rectangle, draw, minimum width=3cm, minimum height=0.9cm, align=center, font=\small, rounded corners}
+]
+
+% App.tsx
+\node[box, fill=green!30] (app) {App.tsx\\BrowserRouter\\Routes};
+
+% Layout
+\node[box, fill=green!20, below=1.3cm of app] (layout) {Layout.tsx\\Header, Sidebar\\Navigation};
+
+% Pages
+\node[box, fill=blue!30, below left=1.5cm and 3cm of layout] (dashboard) {Dashboard\\PriceCards};
+\node[box, fill=blue!20, below left=1.5cm and 0.5cm of layout] (chartpage) {ChartPage\\TradingChart};
+\node[box, fill=orange!30, below right=1.5cm and 0.5cm of layout] (newspage) {NewsPage\\NewsList};
+\node[box, fill=purple!30, below right=1.5cm and 3cm of layout] (accountpage) {AccountPage\\Profile, VIP};
+
+% TradingChart Component
+\node[box, fill=cyan!30, below=3.5cm of layout] (tradingchart) {TradingChart.tsx\\pair, interval props};
+
+% Hooks
+\node[box, fill=pink!30, below left=1.5cm and 2cm of tradingchart] (usewebsocket) {useWebSocket()\\auto-reconnect\\3s timeout};
+
+\node[box, fill=yellow!30, below right=1.5cm and 2cm of tradingchart] (useeffect) {useEffect()\\createChart()\\loadHistoricalData()};
+
+% Libraries
+\node[box, fill=gray!30, below=1.3cm of useeffect] (lwcharts) {lightweight-charts\\CandlestickSeries};
+
+\node[box, fill=gray!30, below=1.3cm of usewebsocket] (websocket) {WebSocket API\\onmessage, onclose};
+
+% API Service
+\node[box, fill=orange!20, below=3.5cm of tradingchart] (apiservice) {api.ts\\getKlines(pair)\\axios};
+
+% Arrows
+\draw[->, thick] (app) -- (layout);
+\draw[->, thick] (layout) -| (dashboard);
+\draw[->, thick] (layout) -| (chartpage);
+\draw[->, thick] (layout) -| (newspage);
+\draw[->, thick] (layout) -| (accountpage);
+
+\draw[->, thick] (chartpage) -- (tradingchart);
+\draw[->, thick] (tradingchart) -| (usewebsocket);
+\draw[->, thick] (tradingchart) -| (useeffect);
+
+\draw[->, thick] (usewebsocket) -- (websocket);
+\draw[->, thick] (useeffect) -- (lwcharts);
+\draw[->, thick] (tradingchart) -- (apiservice);
+
+\end{tikzpicture}
+\caption{Frontend React Component Architecture}
+\label{fig:frontend-flow}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 8: AUTHENTICATION FLOW
+% ==============================================================================
+\section{Sơ đồ Authentication và Security}
+\label{sec:auth-flow}
+
+Sơ đồ \ref{fig:auth-flow} mô tả luồng xác thực và phân quyền người dùng trong hệ thống, hỗ trợ phân biệt tài khoản Free và VIP.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm,
+    startstop/.style={ellipse, draw, minimum width=2.2cm, align=center, font=\small},
+    box/.style={rectangle, draw, minimum width=3.2cm, minimum height=0.9cm, align=center, font=\small, rounded corners},
+    decision/.style={diamond, draw, minimum width=1.8cm, align=center, font=\small, aspect=2},
+    data/.style={rectangle, draw, minimum width=2.8cm, minimum height=0.8cm, align=center, font=\small}
+]
+
+% User action
+\node[startstop, fill=green!30] (start) {User Login};
+
+% Login endpoint
+\node[box, fill=blue!30, below=1.2cm of start] (login) {POST /auth/login\\email, password};
+
+% Validate
+\node[decision, fill=yellow!30, below=1.2cm of login] (validate) {Valid\\Creds?};
+
+% Hash check
+\node[box, fill=orange!30, right=2.5cm of validate] (hash) {bcrypt.Compare\\Hash Password};
+
+% Generate token
+\node[box, fill=purple!30, below=1.5cm of validate] (gentoken) {Generate JWT\\user\_id, tier, exp};
+
+% Return error
+\node[box, fill=red!30, left=2.5cm of validate] (error) {401 Unauthorized};
+
+% Return token
+\node[data, fill=green!20, below=1.2cm of gentoken] (returntoken) {Return Token\\\{token, user, tier\}};
+
+% Protected request
+\node[box, fill=blue!20, below=1.2cm of returntoken] (protreq) {Request with\\Authorization Header};
+
+% Middleware
+\node[decision, fill=yellow!30, below=1.2cm of protreq] (middleware) {Valid\\Token?};
+
+% Check tier
+\node[decision, fill=yellow!30, below=1.5cm of middleware] (checktier) {VIP\\Feature?};
+
+% Free access
+\node[data, fill=gray!30, below left=1.5cm and 2cm of checktier] (freeaccess) {Free Access\\Basic Charts\\Limited News};
+
+% VIP access
+\node[data, fill=purple!30, below right=1.5cm and 2cm of checktier] (vipaccess) {VIP Access\\AI Predictions\\Full Analysis};
+
+% Response
+\node[startstop, fill=cyan!30, below=4cm of checktier] (end) {Response};
+
+% Arrows
+\draw[->, thick] (start) -- (login);
+\draw[->, thick] (login) -- (validate);
+\draw[->, thick] (validate) -- node[above, font=\footnotesize] {no} (error);
+\draw[->, thick] (validate) -- node[above, font=\footnotesize] {check} (hash);
+\draw[->, thick] (hash) |- (gentoken);
+\draw[->, thick] (validate) -- node[left, font=\footnotesize] {yes} (gentoken);
+\draw[->, thick] (gentoken) -- (returntoken);
+\draw[->, thick] (returntoken) -- (protreq);
+\draw[->, thick] (protreq) -- (middleware);
+\draw[->, thick] (middleware) -- node[left, font=\footnotesize] {yes} (checktier);
+\draw[->, thick] (middleware.west) -- ++(-1.5, 0) node[above, font=\footnotesize] {no} |- (error);
+\draw[->, thick] (checktier) -| node[above, font=\footnotesize] {free} (freeaccess);
+\draw[->, thick] (checktier) -| node[above, font=\footnotesize] {vip} (vipaccess);
+\draw[->, thick] (freeaccess) |- (end);
+\draw[->, thick] (vipaccess) |- (end);
+
+\end{tikzpicture}
+\caption{Authentication và Authorization Flow (Free/VIP)}
+\label{fig:auth-flow}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 9: DOCKER COMPOSE ORCHESTRATION
+% ==============================================================================
+\section{Sơ đồ Docker Compose Orchestration}
+\label{sec:docker-flow}
+
+Sơ đồ \ref{fig:docker-flow} mô tả cách các container được orchestrate bằng Docker Compose, với health checks và dependencies giữa các services.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.5cm,
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=1.2cm, align=center, font=\small, rounded corners},
+    network/.style={rectangle, draw=gray!60, fill=gray!5, minimum width=14cm, minimum height=7cm, align=center, font=\small, dashed, rounded corners},
+    volume/.style={rectangle, draw, minimum width=2cm, minimum height=0.6cm, align=center, font=\footnotesize}
+]
+
+% Network box
+\node[network] (network) at (0, 0) {};
+\node[font=\small, gray] at (0, 3.8) {crypto-network (bridge)};
+
+% Containers
+\node[box, fill=green!30] (frontend) at (-4.5, 2) {frontend\\React\\:5173};
+
+\node[box, fill=orange!30] (backend) at (-1.5, 2) {backend\\Golang\\:8080};
+
+\node[box, fill=purple!30] (crawler) at (1.5, 2) {crawler\\Python\\schedule};
+
+\node[box, fill=red!30] (aiservice) at (4.5, 2) {ai-service\\Flask\\:5000};
+
+\node[box, fill=gray!40] (postgres) at (-2, -1) {postgres\\PostgreSQL\\:5432};
+
+\node[box, fill=pink!30] (redis) at (2, -1) {redis\\Redis\\:6379};
+
+% Volumes
+\node[volume, fill=gray!20] (pgdata) at (-2, -3) {pg\_data};
+\node[volume, fill=pink!20] (redisdata) at (2, -3) {redis\_data};
+
+% Dependencies
+\draw[->, thick, dashed, gray] (backend) -- node[right, font=\footnotesize] {depends} (postgres);
+\draw[->, thick, dashed, gray] (backend) -- (redis);
+\draw[->, thick, dashed, gray] (crawler) -- (postgres);
+\draw[->, thick, dashed, gray] (aiservice) -- (postgres);
+
+% Connections
+\draw[->, thick] (frontend) -- (backend);
+\draw[->, thick] (backend) -- (aiservice);
+\draw[->, thick] (postgres) -- (pgdata);
+\draw[->, thick] (redis) -- (redisdata);
+
+% Health checks
+\node[font=\footnotesize, align=left, fill=white, draw=gray!50, rounded corners] at (-5, -1.5) {
+healthcheck:\\
+pg\_isready\\
+interval: 10s
+};
+\node[font=\footnotesize, align=left, fill=white, draw=gray!50, rounded corners] at (5, -1.5) {
+healthcheck:\\
+redis-cli ping\\
+interval: 10s
+};
+
+\end{tikzpicture}
+\caption{Docker Compose Container Orchestration}
+\label{fig:docker-flow}
+\end{figure}
+
+% ==============================================================================
+% SƠ ĐỒ 10: DATA FLOW TỔNG HỢP
+% ==============================================================================
+\section{Sơ đồ Data Flow Tổng hợp}
+\label{sec:data-flow}
+
+Sơ đồ \ref{fig:data-flow} tổng hợp luồng dữ liệu từ nguồn bên ngoài (Binance, News Sources) đến người dùng cuối thông qua các layers của hệ thống.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.3cm,
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.9cm, align=center, font=\small, rounded corners},
+    layer/.style={rectangle, draw=gray!40, fill=gray!5, minimum width=12cm, minimum height=1.8cm, rounded corners}
+]
+
+% Layer backgrounds
+\node[layer] at (0, 5) {};
+\node[layer] at (0, 2.5) {};
+\node[layer] at (0, 0) {};
+\node[layer] at (0, -2.5) {};
+\node[layer] at (0, -5) {};
+
+% Layer labels
+\node[font=\small, gray] at (-5.5, 5) {External};
+\node[font=\small, gray] at (-5.5, 2.5) {Collection};
+\node[font=\small, gray] at (-5.5, 0) {Storage};
+\node[font=\small, gray] at (-5.5, -2.5) {Processing};
+\node[font=\small, gray] at (-5.5, -5) {Delivery};
+
+% External sources
+\node[box, fill=yellow!30] (binance) at (-2, 5) {Binance API\\Prices, Klines};
+\node[box, fill=cyan!30] (newssrc) at (2, 5) {News Sources\\Articles};
+
+% Collection layer
+\node[box, fill=orange!30] (backend) at (-2, 2.5) {Backend\\BinanceService};
+\node[box, fill=purple!30] (crawler) at (2, 2.5) {Crawler\\BeautifulSoup};
+
+% Storage layer
+\node[box, fill=pink!30] (redis) at (-2, 0) {Redis\\Cache 1s TTL};
+\node[box, fill=gray!30] (postgres) at (2, 0) {PostgreSQL\\Persistent};
+
+% Processing layer
+\node[box, fill=blue!30] (handler) at (-2, -2.5) {Handler\\REST API};
+\node[box, fill=red!30] (aiservice) at (2, -2.5) {AI Service\\VADER+TextBlob};
+
+% Delivery layer
+\node[box, fill=green!30] (restapi) at (-3.5, -5) {REST API\\JSON};
+\node[box, fill=orange!20] (websocket) at (0, -5) {WebSocket\\Real-time};
+\node[box, fill=purple!20] (prediction) at (3.5, -5) {Prediction\\UP/DOWN};
+
+% User
+\node[box, fill=green!40] (user) at (0, -7) {User - React Frontend};
+
+% Arrows
+\draw[->, thick, blue] (binance) -- (backend);
+\draw[->, thick, blue] (newssrc) -- (crawler);
+
+\draw[->, thick, blue] (backend) -- (redis);
+\draw[->, thick, blue] (backend) |- (postgres);
+\draw[->, thick, blue] (crawler) -- (postgres);
+
+\draw[->, thick, blue] (redis) -- (handler);
+\draw[->, thick, blue] (postgres) -- (handler);
+\draw[->, thick, blue] (postgres) -- (aiservice);
+
+\draw[->, thick, blue] (handler) -- (restapi);
+\draw[->, thick, blue] (handler) -- (websocket);
+\draw[->, thick, blue] (aiservice) -- (prediction);
+
+\draw[->, thick] (restapi) -- (user);
+\draw[->, thick] (websocket) -- (user);
+\draw[->, thick] (prediction) -- (user);
+
+\end{tikzpicture}
+\caption{Data Flow từ nguồn đến người dùng}
+\label{fig:data-flow}
+\end{figure}

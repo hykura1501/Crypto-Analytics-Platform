@@ -1,0 +1,336 @@
+% =============================================================================
+% CHƯƠNG 1: TÌNH HUỐNG 1 - SCALE WEBSOCKET
+% =============================================================================
+
+\section{TÌNH HUỐNG 1: SCALE WEBSOCKET VỚI HƠN 1000 CLIENT}
+
+\subsection{Bối cảnh}
+
+Bạn được giao xây dựng hệ thống hiển thị giá tài chính thời gian thực cho hơn 1000 người dùng đồng thời. Mỗi người có thể mở nhiều tab (BTCUSDT, ETHUSDT...) và mỗi tab sẽ mở một kết nối WebSocket riêng để nhận dữ liệu từ Binance.
+
+\subsection{Phân tích vấn đề kỹ thuật}
+
+\subsubsection{Các thách thức khi mở rộng WebSocket}
+
+\begin{enumerate}
+    \item \textbf{Kết nối bền vững (Long-lived Connections)}:
+    \begin{itemize}
+        \item WebSocket khác với HTTP request thông thường - kết nối được duy trì liên tục
+        \item Mỗi kết nối tiêu tốn tài nguyên hệ thống (file descriptors, memory)
+        \item Không thể load balance đơn giản như HTTP
+    \end{itemize}
+    
+    \item \textbf{Load Balancer chỉ điều phối kết nối mới}:
+    \begin{itemize}
+        \item Sau khi kết nối được thiết lập, load balancer không can thiệp được
+        \item Instance cũ có thể bị quá tải khi nhận quá nhiều kết nối
+        \item Instance mới không nhận được kết nối từ các client đã kết nối
+    \end{itemize}
+    
+    \item \textbf{Server failure và client recovery}:
+    \begin{itemize}
+        \item Khi server chết, tất cả kết nối bị mất
+        \item Client cần cơ chế tự động reconnect
+        \item Không có state persistence cho WebSocket connections
+    \end{itemize}
+    
+    \item \textbf{Chi phí Pub/Sub}:
+    \begin{itemize}
+        \item Đồng bộ tin nhắn giữa các server instances tốn tài nguyên
+        \item Cần message broker (Redis Pub/Sub, Kafka) để broadcast
+        \item Latency tăng khi số lượng server tăng
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Nguyên lý các giải pháp}
+
+\textbf{Sticky Session}
+\begin{itemize}
+    \item Load balancer duy trì mapping giữa client và server instance
+    \item Client luôn được route đến cùng một server
+    \item Ưu điểm: Đơn giản, dễ triển khai
+    \item Nhược điểm: Mất cân bằng khi một số server có nhiều heavy users
+\end{itemize}
+
+\textbf{IP Hash}
+\begin{itemize}
+    \item Hash IP của client để xác định server instance
+    \item Công thức: $server = hash(client\_ip) \mod n$
+    \item Ưu điểm: Không cần lưu trữ session state
+    \item Nhược điểm: Khi scale, nhiều kết nối bị remap
+\end{itemize}
+
+\textbf{Rendezvous Hashing (Highest Random Weight)}
+\begin{itemize}
+    \item Mỗi client tính weight cho tất cả servers: $weight(client, server_i) = hash(client + server_i)$
+    \item Client được gán cho server có weight cao nhất
+    \item Ưu điểm: Khi thêm/bớt server, chỉ $1/n$ kết nối bị remap
+    \item Nhược điểm: Phức tạp hơn trong implementation
+\end{itemize}
+
+\subsection{Giải pháp trong mã nguồn}
+
+\subsubsection{WebSocket Hub Architecture}
+
+Hệ thống sử dụng pattern \textbf{Hub} để quản lý WebSocket connections:
+
+\begin{lstlisting}[language=Go, caption=WebSocket Hub Structure (hub.go)]
+type Hub struct {
+    // Registered clients per trading pair
+    clients map[string]map[*Client]bool
+    
+    // Inbound messages from the clients
+    broadcast chan *Message
+    
+    // Register requests from the clients
+    Register chan *Client
+    
+    // Unregister requests from clients
+    Unregister chan *Client
+}
+
+func (h *Hub) Run() {
+    for {
+        select {
+        case client := <-h.Register:
+            if h.clients[client.Pair] == nil {
+                h.clients[client.Pair] = make(map[*Client]bool)
+            }
+            h.clients[client.Pair][client] = true
+            
+        case client := <-h.Unregister:
+            if clients, ok := h.clients[client.Pair]; ok {
+                if _, ok := clients[client]; ok {
+                    delete(clients, client)
+                    close(client.Send)
+                }
+            }
+            
+        case message := <-h.broadcast:
+            clients := h.clients[message.Pair]
+            for client := range clients {
+                select {
+                case client.Send <- data:
+                default:
+                    close(client.Send)
+                    delete(clients, client)
+                }
+            }
+        }
+    }
+}
+\end{lstlisting}
+
+\textbf{Phân tích thiết kế}:
+\begin{itemize}
+    \item \textbf{Channel-based communication}: Sử dụng Go channels để xử lý concurrent operations an toàn
+    \item \textbf{Per-pair client grouping}: Clients được nhóm theo trading pair, giúp broadcast hiệu quả
+    \item \textbf{Non-blocking send}: Sử dụng select với default case để tránh blocking khi client chậm
+    \item \textbf{Automatic cleanup}: Client không nhận được message sẽ bị remove tự động
+\end{itemize}
+
+\subsubsection{Client Pump Pattern}
+
+\begin{lstlisting}[language=Go, caption=Client ReadPump và WritePump (client.go)]
+const (
+    writeWait = 10 * time.Second
+    pongWait = 60 * time.Second
+    pingPeriod = (pongWait * 9) / 10
+    maxMessageSize = 512 * 1024
+)
+
+func (c *Client) ReadPump() {
+    defer func() {
+        c.Hub.Unregister <- c
+        c.Conn.Close()
+    }()
+    
+    c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+    c.Conn.SetPongHandler(func(string) error {
+        c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+        return nil
+    })
+    
+    for {
+        _, _, err := c.Conn.ReadMessage()
+        if err != nil {
+            break
+        }
+    }
+}
+
+func (c *Client) WritePump() {
+    ticker := time.NewTicker(pingPeriod)
+    defer func() {
+        ticker.Stop()
+        c.Conn.Close()
+    }()
+    
+    for {
+        select {
+        case message, ok := <-c.Send:
+            if !ok {
+                c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+                return
+            }
+            // Write message with batching
+            w, _ := c.Conn.NextWriter(websocket.TextMessage)
+            w.Write(message)
+            n := len(c.Send)
+            for i := 0; i < n; i++ {
+                w.Write(<-c.Send)
+            }
+            w.Close()
+            
+        case <-ticker.C:
+            c.Conn.WriteMessage(websocket.PingMessage, nil)
+        }
+    }
+}
+\end{lstlisting}
+
+\textbf{Các kỹ thuật tối ưu}:
+\begin{enumerate}
+    \item \textbf{Ping/Pong Heartbeat}: Duy trì kết nối với interval 54 giây
+    \item \textbf{Message Batching}: Gộp nhiều message thành một write operation
+    \item \textbf{Deadline Management}: Timeout cho read/write operations
+    \item \textbf{Graceful Cleanup}: Proper resource cleanup khi connection đóng
+\end{enumerate}
+
+\subsubsection{Frontend WebSocket Reconnection}
+
+\begin{lstlisting}[language=TypeScript, caption=useWebSocket Hook (useWebSocket.ts)]
+export function useWebSocket(url: string) {
+    const [data, setData] = useState<any>(null)
+    const wsRef = useRef<WebSocket | null>(null)
+    const reconnectTimeoutRef = useRef<number>()
+    
+    useEffect(() => {
+        const connect = () => {
+            const ws = new WebSocket(wsUrl)
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected')
+            }
+            
+            ws.onmessage = (event) => {
+                const parsed = JSON.parse(event.data)
+                setData(parsed)
+            }
+            
+            ws.onclose = () => {
+                // Auto reconnect after 3 seconds
+                reconnectTimeoutRef.current = setTimeout(connect, 3000)
+            }
+            
+            wsRef.current = ws
+        }
+        
+        connect()
+        
+        return () => {
+            clearTimeout(reconnectTimeoutRef.current)
+            wsRef.current?.close()
+        }
+    }, [url])
+    
+    return data
+}
+\end{lstlisting}
+
+\subsection{Kiến trúc đề xuất cho Scale WebSocket trên Kubernetes}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.5cm,
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.8cm, align=center},
+    bigbox/.style={rectangle, draw, dashed, minimum width=6cm, minimum height=3cm}
+]
+
+% Load Balancer
+\node[box, fill=orange!30] (lb) {Load Balancer\\(Nginx/HAProxy)};
+
+% WebSocket Servers
+\node[box, fill=blue!30, below left=2cm and 1cm of lb] (ws1) {WS Server 1};
+\node[box, fill=blue!30, below=2cm of lb] (ws2) {WS Server 2};
+\node[box, fill=blue!30, below right=2cm and 1cm of lb] (ws3) {WS Server N};
+
+% Redis Pub/Sub
+\node[box, fill=red!30, below=2cm of ws2] (redis) {Redis Pub/Sub\\Message Broker};
+
+% Database
+\node[box, fill=gray!30, below=1.5cm of redis] (db) {PostgreSQL};
+
+% Clients
+\node[above=1.5cm of lb] (clients) {1000+ Clients};
+
+% Arrows
+\draw[->] (clients) -- (lb);
+\draw[->] (lb) -- (ws1);
+\draw[->] (lb) -- (ws2);
+\draw[->] (lb) -- (ws3);
+\draw[<->] (ws1) -- (redis);
+\draw[<->] (ws2) -- (redis);
+\draw[<->] (ws3) -- (redis);
+\draw[->] (redis) -- (db);
+
+\end{tikzpicture}
+\caption{Kiến trúc WebSocket Scale trên Kubernetes}
+\end{figure}
+
+\subsubsection{Các thành phần trong kiến trúc}
+
+\begin{enumerate}
+    \item \textbf{WebSocket Gateway (Load Balancer)}:
+    \begin{itemize}
+        \item Sử dụng Nginx hoặc HAProxy với sticky session
+        \item Hash-based routing dựa trên user ID hoặc trading pair
+        \item Health check để detect failed instances
+    \end{itemize}
+    
+    \item \textbf{WebSocket Server Cluster}:
+    \begin{itemize}
+        \item Horizontal Pod Autoscaler (HPA) trong Kubernetes
+        \item Mỗi pod xử lý tối đa 500-1000 connections
+        \item Graceful shutdown để migrate connections
+    \end{itemize}
+    
+    \item \textbf{Message Broker (Redis Pub/Sub)}:
+    \begin{itemize}
+        \item Broadcast messages giữa các server instances
+        \item Channel per trading pair: \texttt{price:BTCUSDT}
+        \item Low latency pub/sub mechanism
+    \end{itemize}
+    
+    \item \textbf{Hash Routing Strategy}:
+    \begin{itemize}
+        \item Consistent hashing để minimize remap khi scale
+        \item Virtual nodes để cân bằng load
+        \item Custom load balancer cho WebSocket
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Kết luận Tình huống 1}
+
+\begin{table}[H]
+\centering
+\caption{Metrics của giải pháp WebSocket}
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Metric} & \textbf{Giá trị} \\
+\hline
+Số lượng client hỗ trợ & 5000+ (với 10 server instances) \\
+\hline
+Độ trễ trung bình & < 50ms (trong cùng region) \\
+\hline
+Khả năng chịu lỗi & Có - Auto reconnect trong 3 giây \\
+\hline
+Scale strategy & Horizontal với consistent hashing \\
+\hline
+Message throughput & 10,000+ messages/second \\
+\hline
+\end{tabular}
+\end{table}
+
+\newpage

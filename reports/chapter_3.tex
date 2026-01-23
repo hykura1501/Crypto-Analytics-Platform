@@ -1,0 +1,302 @@
+% =============================================================================
+% CHƯƠNG 3: TÌNH HUỐNG 3 - BẢO MẬT MICROSERVICES
+% =============================================================================
+
+\section{TÌNH HUỐNG 3: BẢO MẬT TRONG HỆ THỐNG MICROSERVICES}
+
+\subsection{Bối cảnh}
+
+Trong giai đoạn thử nghiệm mở rộng của hệ thống tài chính AI, nhóm phát triển phát hiện ra một số API bị gọi bất thường trực tiếp vào các service nội bộ như price-prediction-service và portfolio-backtest-service. Các yêu cầu đó:
+\begin{itemize}
+    \item Không đi qua API Gateway
+    \item Đính kèm JWT hợp lệ nhưng đã cũ (được cấp cách đây 1 tuần)
+    \item Bị gửi từ các client giả mạo
+\end{itemize}
+
+Hệ quả:
+\begin{itemize}
+    \item Một số chiến lược đầu tư bị thực thi sai do sử dụng dữ liệu giả mạo
+    \item Không có log kiểm tra xác thực nên không phát hiện được các yêu cầu giả
+    \item Attacker phát tán hàng loạt JWT giả đến các microservice backend
+\end{itemize}
+
+\subsection{Phân tích vấn đề bảo mật}
+
+\subsubsection{Tại sao JWT alone không đủ?}
+
+\begin{enumerate}
+    \item \textbf{Không thể revoke JWT}:
+    \begin{itemize}
+        \item JWT là stateless - sau khi cấp không thể thu hồi
+        \item Token hợp lệ đến khi hết hạn (có thể 1 tuần)
+        \item Attacker có thể sử dụng token đã đánh cắp
+    \end{itemize}
+    
+    \item \textbf{Không có Single Source of Truth}:
+    \begin{itemize}
+        \item Mỗi service tự verify JWT
+        \item Không có cách kiểm tra token đã bị compromise
+        \item Không tracking được active sessions
+    \end{itemize}
+    
+    \item \textbf{Secret key management}:
+    \begin{itemize}
+        \item Tất cả services chia sẻ cùng secret key
+        \item Nếu key bị lộ, toàn bộ hệ thống bị ảnh hưởng
+        \item Khó rotate key trong production
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Các cuộc tấn công đã mô tả}
+
+\begin{itemize}
+    \item Gọi trực tiếp vào internal services (bypass API Gateway)
+    \item Sử dụng JWT cũ nhưng còn hợp lệ
+    \item Không có audit log cho authentication
+    \item Phát tán JWT giả đến backend services
+\end{itemize}
+
+\subsection{Giải pháp kết hợp OAuth2 + JWT}
+
+\subsubsection{OAuth2 Flow với Refresh Token}
+
+\begin{enumerate}
+    \item \textbf{Access Token}: Short-lived (15-30 phút)
+    \begin{itemize}
+        \item Dùng cho authentication trong requests
+        \item Stateless, verify bằng signature
+    \end{itemize}
+    
+    \item \textbf{Refresh Token}: Long-lived (7-30 ngày)
+    \begin{itemize}
+        \item Lưu trong database/Redis
+        \item Có thể revoke bất kỳ lúc nào
+        \item Dùng để lấy access token mới
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Token Blacklist Implementation}
+
+\begin{lstlisting}[language=Go, caption=Token Blacklist với Redis]
+// Check if token is blacklisted
+func (h *Handler) IsTokenBlacklisted(token string) bool {
+    key := "blacklist:" + token
+    _, err := h.RedisClient.Get(context.Background(), key).Result()
+    return err == nil
+}
+
+// Blacklist a token
+func (h *Handler) BlacklistToken(token string, exp time.Duration) error {
+    key := "blacklist:" + token
+    return h.RedisClient.Set(context.Background(), key, "1", exp).Err()
+}
+
+// Middleware to check blacklist
+func AuthMiddleware(h *Handler) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        token := extractToken(c)
+        
+        // Check blacklist first
+        if h.IsTokenBlacklisted(token) {
+            c.AbortWithStatusJSON(401, gin.H{"error": "Token revoked"})
+            return
+        }
+        
+        // Verify JWT
+        claims, err := verifyJWT(token)
+        if err != nil {
+            c.AbortWithStatusJSON(401, gin.H{"error": "Invalid token"})
+            return
+        }
+        
+        c.Set("user", claims)
+        c.Next()
+    }
+}
+\end{lstlisting}
+
+\subsection{Zero-Trust Architecture}
+
+\subsubsection{Nguyên tắc Zero-Trust}
+
+\begin{enumerate}
+    \item \textbf{Never Trust, Always Verify}:
+    \begin{itemize}
+        \item Không tin tưởng request từ internal network
+        \item Mọi request phải được authenticate
+        \item Verify cả source IP và token
+    \end{itemize}
+    
+    \item \textbf{Least Privilege Access}:
+    \begin{itemize}
+        \item Service chỉ được access resources cần thiết
+        \item Role-based access control (RBAC)
+        \item Scope-based JWT claims
+    \end{itemize}
+    
+    \item \textbf{Micro-segmentation}:
+    \begin{itemize}
+        \item Network policies trong Kubernetes
+        \item Service-to-service authentication (mTLS)
+        \item API Gateway làm single entry point
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Service Mesh với mTLS}
+
+\begin{lstlisting}[caption=Kubernetes Network Policy]
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: price-prediction-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: price-prediction-service
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: api-gateway
+    ports:
+    - protocol: TCP
+      port: 5000
+\end{lstlisting}
+
+\subsection{API Gateway Security}
+
+\subsubsection{Vai trò của API Gateway}
+
+\begin{enumerate}
+    \item \textbf{Single Entry Point}: Tất cả external traffic qua Gateway
+    \item \textbf{Authentication/Authorization}: Verify tokens trước khi forward
+    \item \textbf{Rate Limiting}: Ngăn chặn DDoS và brute force
+    \item \textbf{Request Validation}: Validate input trước khi đến services
+    \item \textbf{Audit Logging}: Ghi log tất cả requests
+\end{enumerate}
+
+\subsubsection{Xử lý khi Attacker bypass Gateway}
+
+\begin{lstlisting}[language=Go, caption=Internal Service Protection]
+// Middleware cho internal services
+func InternalAuthMiddleware() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        // 1. Check request source
+        sourceIP := c.ClientIP()
+        if !isFromAPIGateway(sourceIP) {
+            c.AbortWithStatusJSON(403, gin.H{
+                "error": "Direct access forbidden"
+            })
+            return
+        }
+        
+        // 2. Verify internal service token
+        internalToken := c.GetHeader("X-Internal-Token")
+        if !verifyInternalToken(internalToken) {
+            c.AbortWithStatusJSON(403, gin.H{
+                "error": "Invalid internal token"
+            })
+            return
+        }
+        
+        // 3. Check request signature
+        signature := c.GetHeader("X-Request-Signature")
+        if !verifyRequestSignature(c, signature) {
+            c.AbortWithStatusJSON(403, gin.H{
+                "error": "Invalid request signature"
+            })
+            return
+        }
+        
+        c.Next()
+    }
+}
+\end{lstlisting}
+
+\subsection{Kiến trúc Bảo mật đề xuất}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm,
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.7cm, align=center, font=\small}
+]
+
+% Client
+\node[box, fill=green!30] (client) {Client};
+
+% API Gateway
+\node[box, fill=orange!30, below=1.5cm of client] (gateway) {API Gateway\\Rate Limit + Auth};
+
+% Auth Service
+\node[box, fill=yellow!30, right=2cm of gateway] (auth) {Auth Service\\OAuth2 + JWT};
+
+% Redis
+\node[box, fill=red!30, below=1.2cm of auth] (redis) {Redis\\Token Store};
+
+% Internal Services
+\node[box, fill=blue!20, below left=2cm and 0cm of gateway] (svc1) {Price Service};
+\node[box, fill=blue!20, right=0.3cm of svc1] (svc2) {AI Service};
+\node[box, fill=blue!20, right=0.3cm of svc2] (svc3) {Crawler};
+
+% Database
+\node[box, fill=gray!30, below=1.5cm of svc2] (db) {PostgreSQL};
+
+% Arrows
+\draw[->] (client) -- node[right]{\tiny HTTPS} (gateway);
+\draw[<->] (gateway) -- node[above]{\tiny Verify} (auth);
+\draw[<->] (auth) -- (redis);
+\draw[->] (gateway) -- (svc1);
+\draw[->] (gateway) -- (svc2);
+\draw[->] (gateway) -- (svc3);
+\draw[->] (svc1) -- (db);
+\draw[->] (svc2) -- (db);
+\draw[->] (svc3) -- (db);
+
+% Network boundary
+\draw[dashed, thick] (-2.5,-2.5) rectangle (5,-6.5);
+\node at (-1,-2.8) {\tiny Internal Network};
+
+\end{tikzpicture}
+\caption{Kiến trúc Bảo mật Microservices}
+\end{figure}
+
+\subsection{Kết luận Tình huống 3}
+
+\textbf{Bài học rút ra về kiến trúc bảo mật:}
+
+\begin{enumerate}
+    \item \textbf{Defense in Depth}: Nhiều lớp bảo mật, không phụ thuộc vào một mechanism
+    
+    \item \textbf{Token Lifecycle Management}:
+    \begin{itemize}
+        \item Access token ngắn hạn (15-30 phút)
+        \item Refresh token có thể revoke
+        \item Blacklist cho compromised tokens
+    \end{itemize}
+    
+    \item \textbf{Zero-Trust giữa Services}:
+    \begin{itemize}
+        \item mTLS cho service-to-service communication
+        \item Internal tokens cho authorization
+        \item Network policies hạn chế access
+    \end{itemize}
+    
+    \item \textbf{API Gateway là bắt buộc}:
+    \begin{itemize}
+        \item Single entry point
+        \item Centralized authentication
+        \item Audit logging
+    \end{itemize}
+    
+    \item \textbf{Monitoring và Alerting}:
+    \begin{itemize}
+        \item Log tất cả authentication attempts
+        \item Alert cho suspicious patterns
+        \item Regular security audits
+    \end{itemize}
+\end{enumerate}
+
+\newpage
