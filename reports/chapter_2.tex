@@ -1,0 +1,419 @@
+% =============================================================================
+% CHƯƠNG 2: TÌNH HUỐNG 2 - THU THẬP TIN TỨC
+% =============================================================================
+
+\section{TÌNH HUỐNG 2: THU THẬP TIN TỨC TỰ ĐỘNG}
+
+\subsection{Bối cảnh}
+
+Bạn cần thu thập tin tức tài chính từ hàng trăm website khác nhau. Một số trang sử dụng JavaScript để hiển thị nội dung (Single Page App), một số thường xuyên thay đổi cấu trúc HTML. Các công cụ crawler truyền thống như XPath hoặc CSS Selector liên tục bị lỗi, cần cập nhật lại thủ công, gây tốn kém chi phí bảo trì.
+
+Yêu cầu hệ thống có thể:
+\begin{itemize}
+    \item Tự thích ứng với thay đổi cấu trúc trang
+    \item Phân tích nội dung chính của bài viết (tiêu đề, ngày, nội dung) từ HTML hỗn tạp
+    \item Vận hành ổn định khi scale lên hàng nghìn trang cần thu thập
+\end{itemize}
+
+\subsection{Vấn đề với Crawler Truyền thống}
+
+\subsubsection{Lý do crawler truyền thống dễ bị lỗi}
+
+\begin{enumerate}
+    \item \textbf{Phụ thuộc vào cấu trúc HTML}:
+    \begin{itemize}
+        \item XPath và CSS Selector cố định sẽ lỗi khi website thay đổi layout
+        \item Một class name thay đổi có thể làm hỏng toàn bộ crawler
+        \item Không có khả năng tự phục hồi
+    \end{itemize}
+    
+    \item \textbf{JavaScript Rendering}:
+    \begin{itemize}
+        \item Single Page Applications (SPA) render content bằng JavaScript
+        \item Traditional crawlers chỉ lấy được HTML tĩnh ban đầu
+        \item Cần headless browser tốn tài nguyên
+    \end{itemize}
+    
+    \item \textbf{Chi phí bảo trì cao}:
+    \begin{itemize}
+        \item Mỗi website cần cấu hình selector riêng
+        \item Phải monitor và update thủ công khi website thay đổi
+        \item Không scale được với hàng trăm nguồn tin
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Giải pháp trong mã nguồn: Adaptive Crawler}
+
+\subsubsection{Kiến trúc Crawler Service}
+
+\begin{lstlisting}[language=Python, caption=News Crawler Class (crawler/main.py)]
+class NewsCrawler:
+    def __init__(self):
+        self.db_url = os.getenv('DATABASE_URL')
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        })
+    
+    def learn_structure(self, html_content, sample_data):
+        """
+        Tu dong hoc cau truc HTML cua trang
+        Tim cac selector phu hop de trich xuat thong tin
+        """
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Tim title selector
+        title_selectors = [
+            'h1', 'h2', 'h3',
+            '[class*="title"]', '[class*="headline"]',
+            'article h1', 'article h2'
+        ]
+        
+        # Tim content selector
+        content_selectors = [
+            'article', '[class*="content"]', '[class*="body"]',
+            'main', '.post-content', '.article-body'
+        ]
+        
+        # Tim link selector
+        link_selectors = [
+            'a[href]', 'h2 a', 'h3 a', '.title a'
+        ]
+        
+        return {
+            'title_selectors': title_selectors,
+            'content_selectors': content_selectors,
+            'link_selectors': link_selectors
+        }
+\end{lstlisting}
+
+\subsubsection{Retry Mechanism với Exponential Backoff}
+
+\begin{lstlisting}[language=Python, caption=Database Connection với Retry Logic]
+def get_db_connection(self, max_retries=5):
+    """Ket noi database voi retry logic"""
+    for attempt in range(max_retries):
+        try:
+            conn = psycopg2.connect(self.db_url)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            return conn
+        except (psycopg2.OperationalError, psycopg2.DatabaseError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff
+                print(f"Retry in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                raise
+\end{lstlisting}
+
+\textbf{Công thức Exponential Backoff}:
+$$wait\_time = 2^{attempt} \text{ seconds}$$
+
+Với 5 lần retry: 2s $\rightarrow$ 4s $\rightarrow$ 8s $\rightarrow$ 16s $\rightarrow$ Fail
+
+\subsubsection{Crawling Process}
+
+\begin{lstlisting}[language=Python, caption=Crawl Source Implementation]
+def crawl_source(self, source_id):
+    conn = self.get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Lay thong tin source tu database
+        cur.execute("""
+            SELECT id, name, url, title_selector, content_selector, 
+                   date_selector, link_selector
+            FROM news_sources 
+            WHERE id = %s AND status = 'active'
+        """, (source_id,))
+        source = cur.fetchone()
+        
+        # Fetch homepage
+        response = self.session.get(url, timeout=30)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Tim article links (max 20)
+        article_links = []
+        links = soup.select(link_selector)
+        for link in links[:20]:
+            href = link.get('href', '')
+            full_url = urljoin(url, href)
+            article_links.append({'url': full_url, 'title': link.text})
+        
+        # Process each article
+        for article in article_links:
+            # Check duplicate
+            cur.execute("SELECT id FROM news WHERE url = %s", 
+                       (article['url'],))
+            if cur.fetchone():
+                continue
+            
+            # Fetch and extract
+            article_resp = self.session.get(article['url'], timeout=30)
+            # Extract title, content, date
+            # Save to database
+            
+            time.sleep(1)  # Rate limiting
+    finally:
+        cur.close()
+        conn.close()
+\end{lstlisting}
+
+\subsubsection{Scheduled Crawling}
+
+\begin{lstlisting}[language=Python, caption=Scheduler Implementation]
+def run_scheduler(self):
+    """Chay crawler theo lich"""
+    # Crawl moi 30 phut
+    schedule.every(30).minutes.do(self.crawl_all_sources)
+    
+    # Crawl ngay lap tuc
+    self.crawl_all_sources()
+    
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+\end{lstlisting}
+
+\subsection{AI-based Content Extraction}
+
+\subsubsection{AI Analysis Service}
+
+\begin{lstlisting}[language=Python, caption=Sentiment Analysis với VADER và TextBlob]
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from textblob import TextBlob
+
+vader_analyzer = SentimentIntensityAnalyzer()
+
+def analyze_sentiment(self, text):
+    """
+    Phan tich sentiment cua text
+    Returns: sentiment_label, sentiment_score (-1 to 1)
+    """
+    if not text or len(text.strip()) < 10:
+        return 'neutral', 0.0
+    
+    # VADER sentiment analysis
+    vader_scores = vader_analyzer.polarity_scores(text)
+    
+    # TextBlob sentiment analysis
+    blob = TextBlob(text)
+    blob_polarity = blob.sentiment.polarity
+    
+    # Combine scores
+    combined_score = (vader_scores['compound'] + blob_polarity) / 2
+    
+    # Classify
+    if combined_score >= 0.05:
+        label = 'positive'
+    elif combined_score <= -0.05:
+        label = 'negative'
+    else:
+        label = 'neutral'
+    
+    return label, float(combined_score)
+\end{lstlisting}
+
+\subsubsection{News-Price Alignment}
+
+\begin{lstlisting}[language=Python, caption=Correlation Analysis]
+def align_news_with_price(self, pair_id, time_window_hours=24):
+    """
+    Align tin tuc voi gia lich su de phan tich tuong quan
+    """
+    # Get price before news
+    cur.execute("""
+        SELECT price FROM price_history
+        WHERE pair_id = %s AND timestamp <= %s
+        ORDER BY timestamp DESC LIMIT 1
+    """, (pair_id, published_at))
+    price_before = cur.fetchone()[0]
+    
+    # Get price after news
+    time_after = published_at + timedelta(hours=time_window_hours)
+    cur.execute("""
+        SELECT price FROM price_history
+        WHERE pair_id = %s AND timestamp >= %s AND timestamp <= %s
+        ORDER BY timestamp DESC LIMIT 1
+    """, (pair_id, published_at, time_after))
+    price_after = cur.fetchone()[0]
+    
+    # Calculate correlation
+    price_change = ((price_after - price_before) / price_before) * 100
+    
+    if sentiment_label == 'positive' and price_change > 0:
+        correlation = min(abs(sentiment_score) * abs(price_change) / 10, 1.0)
+    elif sentiment_label == 'negative' and price_change < 0:
+        correlation = min(abs(sentiment_score) * abs(price_change) / 10, 1.0)
+\end{lstlisting}
+
+\subsection{AI Trend Prediction - Dự đoán xu hướng}
+
+Hệ thống sử dụng kết hợp phân tích sentiment và dữ liệu giá lịch sử để dự đoán xu hướng UP/DOWN với reasoning chi tiết.
+
+\begin{lstlisting}[language=Python, caption=Trend Prediction Algorithm (ai-service/main.py)]
+def predict_trend(self, pair_id, time_horizon='24h'):
+    """
+    Du doan xu huong gia dua tren phan tich tin tuc va gia lich su
+    Returns: prediction (up/down/neutral), confidence, reasoning
+    """
+    # Get recent news sentiment (trong 24h)
+    hours = int(time_horizon.replace('h', ''))
+    time_threshold = datetime.now() - timedelta(hours=hours)
+    
+    cur.execute("""
+        SELECT sentiment_score, sentiment_label, COUNT(*) as count
+        FROM news n
+        JOIN news_price_alignment npa ON n.id = npa.news_id
+        WHERE npa.pair_id = %s AND n.published_at >= %s
+        GROUP BY sentiment_score, sentiment_label
+    """, (pair_id, time_threshold))
+    
+    sentiment_data = cur.fetchall()
+    
+    # Get recent price trend (100 data points)
+    cur.execute("""
+        SELECT price, timestamp FROM price_history
+        WHERE pair_id = %s ORDER BY timestamp DESC LIMIT 100
+    """, (pair_id,))
+    price_data = cur.fetchall()
+    
+    # Calculate averages
+    prices = [float(row[0]) for row in price_data]
+    price_change = ((prices[0] - prices[-1]) / prices[-1]) * 100
+    avg_sentiment = sum(score * count for score, _, count in sentiment_data) \
+                    / sum(count for _, _, count in sentiment_data)
+    
+    # Make prediction with confidence
+    if avg_sentiment > 0.1 and price_change > 0:
+        prediction = 'up'
+        confidence = min(0.5 + abs(avg_sentiment) * 0.3, 0.9)
+    elif avg_sentiment < -0.1 and price_change < 0:
+        prediction = 'down'
+        confidence = min(0.5 + abs(avg_sentiment) * 0.3, 0.9)
+    
+    # Build reasoning explanation
+    reasoning = f"Avg sentiment: {avg_sentiment:.3f}, " \
+                f"Price change: {price_change:.2f}%, News: {count} items"
+    
+    return {
+        'prediction': prediction,
+        'confidence': round(confidence, 4),
+        'reasoning': reasoning,
+        'sentiment_score': avg_sentiment,
+        'price_change_percent': price_change
+    }
+\end{lstlisting}
+
+\subsubsection*{Thuật toán Prediction}
+
+\begin{table}[H]
+\centering
+\caption{Decision Matrix cho Trend Prediction}
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Avg Sentiment} & \textbf{Price Change} & \textbf{Prediction} & \textbf{Confidence} \\
+\hline
+$> 0.1$ & $> 0\%$ & UP & $0.5 + |sentiment| \times 0.3$ \\
+\hline
+$< -0.1$ & $< 0\%$ & DOWN & $0.5 + |sentiment| \times 0.3$ \\
+\hline
+$> 0.2$ & any & UP & $0.4 + |sentiment| \times 0.3$ \\
+\hline
+$< -0.2$ & any & DOWN & $0.4 + |sentiment| \times 0.3$ \\
+\hline
+else & any & NEUTRAL & $0.5$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Công thức Confidence Score}:
+$$confidence = \min(base + |avg\_sentiment| \times 0.3, \, 0.9)$$
+
+Với $base = 0.5$ khi sentiment và price cùng hướng, $base = 0.4$ khi chỉ dựa vào sentiment.
+
+\subsubsection*{Ví dụ Response API}
+
+\begin{lstlisting}[language=json, caption=API Response từ /api/predict endpoint]
+{
+  "prediction": "up",
+  "confidence": 0.7523,
+  "reasoning": "Avg sentiment: 0.342, Price change: 2.15%, News: 15 items",
+  "sentiment_score": 0.342,
+  "price_change_percent": 2.15,
+  "time_horizon": "24h"
+}
+\end{lstlisting}
+
+\subsection{So sánh Rule-based vs AI-based Parser}
+
+\begin{table}[H]
+\centering
+\caption{So sánh các phương pháp trích xuất nội dung}
+\begin{tabular}{|p{3cm}|p{5cm}|p{5cm}|}
+\hline
+\textbf{Tiêu chí} & \textbf{Rule-based (XPath/CSS)} & \textbf{AI-based (LLM/ML)} \\
+\hline
+Độ chính xác ban đầu & Cao (nếu selector đúng) & Trung bình-Cao \\
+\hline
+Khả năng thích ứng & Thấp - phải update thủ công & Cao - tự học cấu trúc mới \\
+\hline
+Chi phí vận hành & Cao (bảo trì liên tục) & Thấp (sau khi train) \\
+\hline
+Tốc độ & Rất nhanh & Chậm hơn (inference time) \\
+\hline
+Resource & Thấp & Cao (GPU/CPU) \\
+\hline
+Scale & Khó - mỗi site cần config & Dễ - một model cho nhiều site \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Kiến trúc Crawler đề xuất}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm,
+    box/.style={rectangle, draw, minimum width=2.8cm, minimum height=0.8cm, align=center, font=\small}
+]
+
+% Components
+\node[box, fill=purple!30] (scheduler) {Crawl Scheduler\\(Cron/Schedule)};
+\node[box, fill=orange!30, right=2cm of scheduler] (queue) {URL Queue\\(Redis/RabbitMQ)};
+\node[box, fill=blue!30, below=1.5cm of queue] (engine) {Crawler Engine\\(Python/Scrapy)};
+\node[box, fill=red!30, left=2cm of engine] (parser) {AI Parser\\(LLM/VADER)};
+\node[box, fill=gray!30, below=1.5cm of engine] (store) {Data Store\\(PostgreSQL)};
+
+% Arrows
+\draw[->] (scheduler) -- node[above]{\tiny URLs} (queue);
+\draw[->] (queue) -- node[right]{\tiny Fetch} (engine);
+\draw[->] (engine) -- node[above]{\tiny HTML} (parser);
+\draw[->] (parser) -- node[left]{\tiny Parsed Data} (store);
+\draw[->] (engine) -- node[right]{\tiny Raw Data} (store);
+
+\end{tikzpicture}
+\caption{Kiến trúc Crawler với AI Parser}
+\end{figure}
+
+\subsection{Kết luận Tình huống 2}
+
+\textbf{Khi nào dùng AI-based parser?}
+\begin{itemize}
+    \item Thu thập từ nhiều nguồn (>50 websites)
+    \item Website thường xuyên thay đổi cấu trúc
+    \item Cần extract semantic meaning, không chỉ text
+    \item Budget cho AI inference không phải vấn đề
+\end{itemize}
+
+\textbf{Khi nào dùng Rule-based?}
+\begin{itemize}
+    \item Số lượng nguồn ít, ổn định (<10)
+    \item Website có cấu trúc chuẩn, ít thay đổi
+    \item Cần tốc độ cao, real-time crawling
+    \item Resource hạn chế
+\end{itemize}
+
+\newpage

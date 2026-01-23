@@ -1,0 +1,207 @@
+% =============================================================================
+% MỤC TIÊU ĐỒ ÁN
+% =============================================================================
+
+\section*{Mục tiêu đồ án}
+\addcontentsline{toc}{section}{Mục tiêu đồ án}
+
+Bài tập nhóm này nhằm giúp sinh viên:
+
+\begin{itemize}
+    \item Hiểu bản chất kiến trúc hệ thống phân tán trong các tình huống thực tế, đặc biệt là các hệ thống tài chính AI cần xử lý dữ liệu thời gian thực, thu thập dữ liệu quy mô lớn, và đảm bảo bảo mật khi mở rộng.
+    
+    \item Tư duy phản biện và phân tích kỹ thuật chuyên sâu các vấn đề thường gặp trong vận hành hệ thống ở môi trường production: mở rộng kết nối WebSocket, thu thập dữ liệu không ổn định từ nhiều nguồn, bảo vệ hệ thống khỏi tấn công bảo mật.
+    
+    \item Đề xuất kiến trúc phù hợp, thể hiện qua sơ đồ rõ ràng và có lý do giải thích từng thành phần (gateway, load balancer, broker, hash router, LLM parser, auth service...).
+    
+    \item Hiểu và so sánh các giải pháp kỹ thuật, phân tích trade-off về hiệu năng, chi phí, khả năng chịu lỗi và mở rộng.
+    
+    \item Vận dụng LLM như một công cụ hỗ trợ phân tích, biết cách đặt câu hỏi hiệu quả, phản biện và đánh giá kết quả thay vì sao chép máy móc.
+    
+    \item Phát triển kỹ năng thiết kế kiến trúc phần mềm hiện đại, áp dụng vào các hệ thống thực tế như: dịch vụ tài chính, streaming, giao dịch thời gian thực, hệ thống phân tích AI, microservices bảo mật cao.
+\end{itemize}
+
+\subsection*{Yêu cầu sinh viên}
+
+Sinh viên cần:
+\begin{enumerate}
+    \item Tự nghiên cứu vấn đề kỹ thuật dựa vào tình huống.
+    \item Thiết kế sơ đồ kiến trúc minh họa rõ luồng xử lý.
+    \item So sánh và giải thích các giải pháp đã lựa chọn.
+    \item Viết prompt để khai thác LLM một cách hiệu quả và phản biện kết quả nhận được.
+    \item Rút ra bài học tổng kết về tư duy kiến trúc và kỹ năng kỹ thuật.
+\end{enumerate}
+
+\subsection*{Giới thiệu dự án}
+
+Đồ án này nhằm xây dựng một hệ thống phân tích tài chính AI (\textbf{Crypto Analytics Platform}) có khả năng:
+\begin{itemize}
+    \item Hiển thị giá cryptocurrency thời gian thực cho hơn 1000 người dùng đồng thời
+    \item Thu thập tin tức từ nhiều nguồn khác nhau với khả năng tự thích ứng
+    \item Phân tích sentiment và dự đoán xu hướng giá bằng AI
+    \item Quản lý tài khoản người dùng với phân quyền (thường/VIP)
+    \item Đảm bảo bảo mật khi mở rộng hệ thống microservices
+\end{itemize}
+
+\subsection*{Yêu cầu chức năng chi tiết}
+
+\begin{mybox}
+\textbf{Điều kiện tiên quyết:} Người dùng có thể chọn cặp tiền giao dịch (BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, ADAUSDT, XRPUSDT...)
+\end{mybox}
+
+\subsubsection*{1. Thu thập tin tức tài chính (Crawler Service)}
+\begin{itemize}
+    \item Thu thập tin tức từ nhiều nguồn khác nhau (CoinTelegraph, CoinDesk, CryptoNews...)
+    \item \textbf{Xác định thông tin cần thiết}: tiêu đề, nội dung, ngày đăng, tác giả, URL nguồn
+    \item \textbf{Tự động học cấu trúc HTML}: mỗi trang có structure khác nhau, hệ thống tự động trích xuất thông tin
+    \item \textbf{Xử lý thay đổi cấu trúc}: khi website thay đổi layout, crawler vẫn hoạt động
+    \item Dữ liệu lưu trữ đầy đủ trong database, hiển thị có chọn lọc trên GUI
+\end{itemize}
+
+\subsubsection*{2. Hiển thị biểu đồ giá (Trading Chart)}
+\begin{itemize}
+    \item Giao diện tương tự \url{https://vn.tradingview.com/chart/}
+    \item \textbf{Dữ liệu từ Binance API}: lấy giá lịch sử qua REST API
+    \item \textbf{Cập nhật realtime}: sử dụng WebSocket để nhận giá mới nhất
+    \item \textbf{Đa khung thời gian}: 1m, 5m, 15m, 1h, 4h, 1d, 1w
+    \item \textbf{Đa cặp tiền}: BTCUSDT, ETHUSDT, BNBUSDT...
+    \item \textbf{Kiến trúc scale}: hỗ trợ nhiều người dùng đồng thời
+\end{itemize}
+
+\subsubsection*{3. Phân tích AI và Sentiment Analysis}
+\begin{itemize}
+    \item \textbf{Align tin tức với giá}: kết hợp tin tức và giá lịch sử để phân tích
+    \item \textbf{Mô hình AI}: sử dụng VADER, TextBlob cho sentiment analysis
+    \item \textbf{Phân tích nhân quả (Causal Analysis)}:
+    \begin{itemize}
+        \item Dự đoán xu hướng giờ/ngày tiếp theo: UP/DOWN
+        \item Đưa ra lý do tại sao (reasoning based on news sentiment)
+        \item Độ tin cậy (confidence score) cho mỗi prediction
+    \end{itemize}
+\end{itemize}
+
+\subsubsection*{4. Quản lý tài khoản (Account Management)}
+\begin{itemize}
+    \item \textbf{Tài khoản thường (Free)}:
+    \begin{itemize}
+        \item Xem biểu đồ giá realtime
+        \item Xem tin tức cơ bản
+        \item Quản lý watchlist
+    \end{itemize}
+    \item \textbf{Tài khoản VIP (Premium)}:
+    \begin{itemize}
+        \item Tất cả tính năng của tài khoản thường
+        \item Xem phân tích AI và sentiment analysis
+        \item Nhận dự đoán xu hướng với lý do chi tiết
+        \item Xem correlation giữa tin tức và giá
+    \end{itemize}
+\end{itemize}
+
+\subsection*{Mapping yêu cầu với Tình huống kỹ thuật}
+
+\begin{table}[H]
+\centering
+\caption{Mapping yêu cầu đồ án với các tình huống kỹ thuật}
+\begin{tabular}{|p{4cm}|p{4cm}|p{5cm}|}
+\hline
+\textbf{Yêu cầu chức năng} & \textbf{Tình huống kỹ thuật} & \textbf{Giải pháp} \\
+\hline
+Hiển thị biểu đồ realtime cho 1000+ users & Tình huống 1: Scale WebSocket & Hub pattern, Redis Pub/Sub, Auto-reconnect \\
+\hline
+Thu thập tin tức từ nhiều nguồn & Tình huống 2: Crawler tự động & Adaptive selectors, AI parsing, Exponential backoff \\
+\hline
+Quản lý tài khoản thường/VIP & Tình huống 3: Bảo mật & OAuth2 + JWT, Token blacklist, RBAC \\
+\hline
+Phân tích sentiment và dự đoán & AI Service & VADER + TextBlob, News-Price alignment \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection*{Công nghệ sử dụng}
+
+\begin{table}[H]
+\centering
+\caption{Technology Stack}
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Thành phần} & \textbf{Công nghệ} & \textbf{Mục đích} \\
+\hline
+Frontend & React + TypeScript + Vite & Giao diện người dùng, Trading Chart \\
+\hline
+Trading Chart & Lightweight Charts & Hiển thị biểu đồ nến (candlestick) \\
+\hline
+Backend API & Golang + Gin Framework & REST API, WebSocket Hub \\
+\hline
+Crawler Service & Python + BeautifulSoup & Thu thập tin tức tự động \\
+\hline
+AI Service & Python + Flask + VADER + TextBlob & Phân tích sentiment, dự đoán \\
+\hline
+Database & PostgreSQL 15 & Lưu trữ dữ liệu chính \\
+\hline
+Cache & Redis 7 & Caching, session store, token blacklist \\
+\hline
+Container & Docker Compose & Orchestration \\
+\hline
+External API & Binance API (REST + WebSocket) & Dữ liệu giá lịch sử và realtime \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection*{Kiến trúc tổng quan}
+
+Hệ thống được thiết kế theo kiến trúc microservices với các thành phần chính:
+
+\begin{enumerate}
+    \item \textbf{Client Layer}: Frontend React với Trading Chart và các pages (Dashboard, Chart, News, Account)
+    \item \textbf{API Gateway Layer}: Backend Golang với REST API và WebSocket Hub
+    \item \textbf{Business Logic Layer}: Crawler Service (thu thập tin tức) và AI Analysis Service (phân tích sentiment)
+    \item \textbf{Data Layer}: PostgreSQL (dữ liệu chính) và Redis (cache, sessions)
+    \item \textbf{External Services}: Binance API (giá) và các nguồn tin tức (CoinTelegraph, CoinDesk)
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1cm,
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.7cm, align=center, font=\small}
+]
+
+% User
+\node[box, fill=green!30] (user) {Người dùng\\(Free/VIP)};
+
+% Frontend
+\node[box, fill=green!20, below=1cm of user] (fe) {Frontend\\React + Chart};
+
+% Backend
+\node[box, fill=orange!30, below=1cm of fe] (api) {Backend API\\(Golang)};
+\node[box, fill=orange!20, right=0.5cm of api] (ws) {WebSocket\\Hub};
+
+% Services
+\node[box, fill=purple!30, below left=1.5cm and 0.5cm of api] (crawler) {Crawler\\Service};
+\node[box, fill=red!30, below right=1.5cm and 0.5cm of api] (ai) {AI Analysis\\Service};
+
+% Database
+\node[box, fill=gray!30, below=3cm of api] (db) {PostgreSQL};
+\node[box, fill=pink!30, right=1cm of db] (redis) {Redis};
+
+% External
+\node[box, fill=yellow!30, right=3cm of ws] (binance) {Binance\\API};
+\node[box, fill=cyan!30, left=3cm of crawler] (news) {News\\Sources};
+
+% Arrows
+\draw[->] (user) -- (fe);
+\draw[<->] (fe) -- (api);
+\draw[<->] (fe) -- (ws);
+\draw[->] (api) -- (db);
+\draw[<->] (api) -- (redis);
+\draw[->] (ws) -- (binance);
+\draw[->] (crawler) -- (news);
+\draw[->] (crawler) -- (db);
+\draw[->] (ai) -- (db);
+\draw[<->] (api) -- (ai);
+
+\end{tikzpicture}
+\caption{Kiến trúc tổng quan hệ thống Crypto Analytics Platform}
+\end{figure}
+
+\newpage
