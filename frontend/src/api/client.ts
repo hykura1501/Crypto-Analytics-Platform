@@ -15,6 +15,8 @@ import type {
   Source,
   CreateSourceRequest,
   UpdateSourceRequest,
+  PredictionRequest,
+  PredictionResponse,
 } from "../types";
 
 class ApiClient {
@@ -237,6 +239,29 @@ class ApiClient {
 
   async deleteSource(sourceId: string): Promise<void> {
     await this.client.delete(`/news/sources/${sourceId}`);
+  }
+
+  async analyzeSource(sourceId: string): Promise<{ message: string; source_id: string }> {
+    const response = await this.client.post<{ message: string; source_id: string }>(
+      `/news/sources/${sourceId}/analyze`
+    );
+    return response.data;
+  }
+
+  // Prediction endpoints
+  async trainModel(request: PredictionRequest): Promise<{ message: string; rmse?: number; mae?: number; directional_accuracy?: number }> {
+    const response = await this.client.post<{ message: string; rmse?: number; mae?: number; directional_accuracy?: number }>(
+      "/ai/prediction/train",
+      request
+    );
+    return response.data;
+  }
+
+  async getPrediction(symbol: string, horizon_hours: number): Promise<PredictionResult> {
+    const response = await this.client.get<PredictionResponse>(
+      `/ai/prediction/predict/${symbol}/${horizon_hours}`
+    );
+    return response.data.result;
   }
 
   getClient(): AxiosInstance {

@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ChartContainer from '../components/ChartContainer';
+import PredictionPanel from '../components/PredictionPanel';
 import { apiClient } from '../api/client';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [selectedSymbol, setSelectedSymbol] = useState('BTCUSDT');
+  const [predictionHorizon, setPredictionHorizon] = useState(4);
 
   const handleLogout = async () => {
     await apiClient.logout();
@@ -56,11 +58,35 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <div className="flex-1 p-4 overflow-hidden">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
-          <ChartContainer symbol={selectedSymbol} defaultInterval="1m" />
-          <ChartContainer symbol={selectedSymbol} defaultInterval="5m" />
-          <ChartContainer symbol={selectedSymbol} defaultInterval="15m" />
-          <ChartContainer symbol={selectedSymbol} defaultInterval="1h" />
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 h-full">
+          {/* Charts Section - 3 columns */}
+          <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
+            <ChartContainer symbol={selectedSymbol} defaultInterval="1m" />
+            <ChartContainer symbol={selectedSymbol} defaultInterval="5m" />
+            <ChartContainer symbol={selectedSymbol} defaultInterval="15m" />
+            <ChartContainer symbol={selectedSymbol} defaultInterval="1h" />
+          </div>
+          
+          {/* AI Prediction Panel - 1 column */}
+          <div className="lg:col-span-1 h-full">
+            <div className="h-full flex flex-col">
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-xs font-medium text-gray-700">Prediction Horizon:</label>
+                <select
+                  value={predictionHorizon}
+                  onChange={(e) => setPredictionHorizon(Number(e.target.value))}
+                  className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value={1}>1 hour</option>
+                  <option value={4}>4 hours</option>
+                  <option value={24}>24 hours</option>
+                </select>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <PredictionPanel symbol={selectedSymbol} horizonHours={predictionHorizon} />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

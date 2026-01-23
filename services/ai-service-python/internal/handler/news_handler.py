@@ -25,14 +25,14 @@ class NewsHandler:
         logging.info(f"📰 Processing news #{news_id}: {title[:50]}...")
 
         # Analyze sentiment
-        sentiment_result = self.analyzer.analyze(f"{title} {content}")
-        logging.info(f"🎭 Sentiment: {sentiment_result.label} (score: {sentiment_result.compound:.3f})")
+        keywords, sentiment_score = self.analyzer.analyze(f"{title} {content}")
+        logging.info(f"🎭 Sentiment: {keywords} (score: {sentiment_score:.3f})")
 
         # Update database with sentiment score
         try:
             with db.conn.cursor() as cur:
                 query = "UPDATE articles SET sentiment_score = %s WHERE id = %s"
-                cur.execute(query, (sentiment_result.compound, news_id))
+                cur.execute(query, (sentiment_score, news_id))
                 db.conn.commit()
             logging.info(f"✅ Updated article #{news_id} with sentiment score")
         except Exception as e:

@@ -59,6 +59,7 @@ func (s *Server) setupRoutes() {
 		v1.POST("/sources", s.createSource)
 		v1.PUT("/sources/:id", s.updateSource)
 		v1.DELETE("/sources/:id", s.deleteSource)
+		v1.POST("/sources/:id/analyze", s.analyzeSource)
 	}
 }
 

@@ -117,3 +117,54 @@ export interface UpdateSourceRequest {
   tags_selector?: string;
 }
 
+// Prediction Types
+export interface PredictionRequest {
+  symbol: string;
+  horizon_hours: number;
+  years?: number;
+}
+
+export interface PredictionResult {
+  prediction_horizon: string;
+  predicted_price: string;
+  current_price: string;
+  predicted_change_pct: string;
+  confidence_score: string;
+  metadata: {
+    model_key: string;
+    base_prediction?: string;
+    sentiment_adjustment?: string;
+    features_count: number;
+    news_features_count: number;
+    tech_features_count: number;
+    recent_news_analyzed: number;
+  };
+  top_influential_features: string[];
+  feature_analysis: {
+    top_news_features: Array<{ feature: string; importance: number }>;
+    top_technical_indicators: Array<{ feature: string; importance: number }>;
+    shap_contributions: Record<string, number>;
+  };
+  top_news_articles: Array<{
+    id: number;
+    title: string;
+    url: string;
+    published_at: string;
+    sentiment_score: number;
+    language: string;
+    keywords: string[];
+  }>;
+  explanation: {
+    primary_factors: {
+      most_important_feature: string;
+      is_news_important: boolean;
+      news_vs_technical: string;
+      news_influence_pct: string;
+    };
+  };
+}
+
+export interface PredictionResponse {
+  message: string;
+  result: PredictionResult;
+}

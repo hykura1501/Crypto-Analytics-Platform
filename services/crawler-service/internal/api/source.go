@@ -99,3 +99,28 @@ func (s *Server) deleteSource(c *gin.Context) {
 		"source_id": sourceID,
 	})
 }
+
+func (s *Server) analyzeSource(c *gin.Context) {
+	sourceID := c.Param("id")
+	source, err := s.sourceHandler.GetSource(sourceID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Source not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Trigger analysis in background
+	go func() {
+		if err := s.crawlService.AnalyzeSource(source.SourceID, source.RssURL); err != nil {
+			// Log error but don't fail the request
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Analysis triggered successfully",
+		"source_id": sourceID,
+	})
+}
