@@ -11,6 +11,11 @@ type Config struct {
 	RSS      RSSConfig
 	Crawler  CrawlerConfig
 	Server   ServerConfig
+	JWT      JWTConfig
+}
+
+type JWTConfig struct {
+	Secret string
 }
 
 type DatabaseConfig struct {
@@ -69,6 +74,9 @@ func Load() *Config {
 		},
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8083"),
+		},
+		JWT: JWTConfig{
+			Secret: getEnv("JWT_SECRET", "super-secret-key"),
 		},
 	}
 }

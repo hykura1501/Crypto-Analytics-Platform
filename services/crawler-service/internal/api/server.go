@@ -7,6 +7,7 @@ import (
 	"github.com/crypto-platform/crawler-service/config"
 	"github.com/crypto-platform/crawler-service/internal/crawler"
 	"github.com/crypto-platform/crawler-service/internal/handler"
+	"github.com/crypto-platform/crawler-service/internal/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -53,13 +54,17 @@ func (s *Server) setupRoutes() {
 		// Articles endpoint
 		v1.GET("/articles", s.articleHandler.ListArticles)
 
-		// Source CRUD endpoints
-		v1.GET("/sources", s.listSources)
-		v1.GET("/sources/:id", s.getSource)
-		v1.POST("/sources", s.createSource)
-		v1.PUT("/sources/:id", s.updateSource)
-		v1.DELETE("/sources/:id", s.deleteSource)
-		v1.POST("/sources/:id/analyze", s.analyzeSource)
+		// Source CRUD endpoints (ADMIN only)
+		sources := v1.Group("/sources")
+		sources.Use(middleware.AuthAdminMiddleware(s.config.JWT.Secret))
+		{
+			sources.GET("", s.listSources)
+			sources.GET("/:id", s.getSource)
+			sources.POST("", s.createSource)
+			sources.PUT("/:id", s.updateSource)
+			sources.DELETE("/:id", s.deleteSource)
+			sources.POST("/:id/analyze", s.analyzeSource)
+		}
 	}
 }
 

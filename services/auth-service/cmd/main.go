@@ -94,6 +94,22 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
+	// Ensure at least one ADMIN exists: promote first user if no admin
+	var adminCount int64
+	if err := db.Model(&model.User{}).Where("role = ?", model.RoleAdmin).Count(&adminCount).Error; err != nil {
+		return fmt.Errorf("failed to count admins: %w", err)
+	}
+	if adminCount == 0 {
+		var first model.User
+		if err := db.Order("id ASC").First(&first).Error; err == nil {
+			first.Role = model.RoleAdmin
+			if err := db.Save(&first).Error; err != nil {
+				return fmt.Errorf("failed to seed admin: %w", err)
+			}
+			log.Printf("Seeded first user (id=%d, email=%s) as ADMIN", first.ID, first.Email)
+		}
+	}
+
 	log.Println("Migrations completed successfully")
 	return nil
 }

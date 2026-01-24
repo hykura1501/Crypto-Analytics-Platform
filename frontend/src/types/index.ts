@@ -57,17 +57,25 @@ export interface RegisterRequest {
   last_name?: string;
 }
 
+export type UserRole = 'ADMIN' | 'NORMAL' | 'VIP';
+
+export interface User {
+  id: number;
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  role: UserRole;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface AuthResponse {
   access_token: string;
   refresh_token: string;
   token_type: string;
   expires_in: number;
-  user?: {
-    id: number;
-    email: string;
-    first_name?: string;
-    last_name?: string;
-  };
+  user?: User;
 }
 
 export interface RefreshTokenRequest {

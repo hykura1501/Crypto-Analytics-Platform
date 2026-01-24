@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/crypto-platform/auth-service/internal/handler"
 	"github.com/crypto-platform/auth-service/internal/middleware"
+	"github.com/crypto-platform/auth-service/internal/model"
 	"github.com/crypto-platform/auth-service/pkg/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -33,6 +34,14 @@ func SetupRouter(authHandler *handler.AuthHandler, jwtManager *utils.JWTManager)
 		{
 			protected.GET("/validate", authHandler.Validate)
 			protected.GET("/me", authHandler.Me)
+		}
+
+		// Admin-only routes (user management)
+		admin := v1.Group("/auth")
+		admin.Use(middleware.AuthMiddleware(jwtManager), middleware.RequireRole(model.RoleAdmin))
+		{
+			admin.GET("/users", authHandler.ListUsers)
+			admin.PATCH("/users/:id/role", authHandler.UpdateUserRole)
 		}
 	}
 

@@ -28,6 +28,7 @@ class KafkaConfig:
 class APIConfig:
     def __init__(self):
         self.port = int(os.getenv("API_PORT", "9001"))
+        self.jwt_secret = os.getenv("JWT_SECRET", "super-secret-key")
 
 class GeminiConfig:
     def __init__(self):

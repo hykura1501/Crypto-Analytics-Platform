@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import News from './pages/News';
 import Sources from './pages/Sources';
 import SourceForm from './pages/SourceForm';
+import Users from './pages/Users';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -32,7 +33,7 @@ function App() {
         <Route
           path="/sources"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute adminOnly>
               <Sources />
             </ProtectedRoute>
           }
@@ -40,7 +41,7 @@ function App() {
         <Route
           path="/sources/new"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute adminOnly>
               <SourceForm />
             </ProtectedRoute>
           }
@@ -48,8 +49,16 @@ function App() {
         <Route
           path="/sources/:id/edit"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute adminOnly>
               <SourceForm />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute adminOnly>
+              <Users />
             </ProtectedRoute>
           }
         />

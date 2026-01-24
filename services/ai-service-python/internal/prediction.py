@@ -30,6 +30,24 @@ class PredictionPipeline:
     def _get_model_key(self, symbol: str, horizon_hours: int) -> str:
         return f"{symbol}_{horizon_hours}"
     
+    def _sanitize_float(self, value: float) -> float:
+        """Convert inf, -inf, and nan to None (which becomes null in JSON)"""
+        if isinstance(value, (int, float)):
+            if np.isinf(value) or np.isnan(value):
+                return None
+        return value
+    
+    def _sanitize_dict(self, data: Dict) -> Dict:
+        """Recursively sanitize dictionary to remove inf, -inf, and nan values"""
+        if isinstance(data, dict):
+            return {k: self._sanitize_dict(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._sanitize_dict(item) for item in data]
+        elif isinstance(data, (int, float)):
+            return self._sanitize_float(data)
+        else:
+            return data
+    
     def load_price_data(self, symbol: str = "BTCUSDT", years: int = 2) -> pd.DataFrame:
         """Load price data from database"""
         query = """
@@ -341,12 +359,18 @@ class PredictionPipeline:
         X = latest[feature_names].fillna(0)
         
         # Predict
-        current_price = float(latest['close'].iloc[0])
-        predicted_price = float(model.predict(X)[0])
+        current_price = self._sanitize_float(float(latest['close'].iloc[0]))
+        predicted_price = self._sanitize_float(float(model.predict(X)[0]))
+        
+        # Ensure prices are valid numbers
+        if current_price is None:
+            current_price = 0.0
+        if predicted_price is None:
+            predicted_price = current_price
         
         # 1. Feature Importance (từ model)
-        importance = {f: float(imp) for f, imp in zip(feature_names, model.feature_importances_)}
-        top_features = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10]
+        importance = {f: self._sanitize_float(float(imp)) for f, imp in zip(feature_names, model.feature_importances_)}
+        top_features = sorted(importance.items(), key=lambda x: x[1] if x[1] is not None else 0, reverse=True)[:10]
         
         # 2. SHAP Explanation (XAI)
         explanation = {}
@@ -356,25 +380,25 @@ class PredictionPipeline:
                 shap_values = explainer.shap_values(X)
                 feature_contrib = dict(zip(feature_names, shap_values[0]))
                 # Sort by absolute contribution
-                top_contrib = sorted(feature_contrib.items(), key=lambda x: abs(x[1]), reverse=True)[:10]
-                explanation = {k: float(v) for k, v in top_contrib}
+                top_contrib = sorted(feature_contrib.items(), key=lambda x: abs(x[1]) if not (np.isinf(x[1]) or np.isnan(x[1])) else 0, reverse=True)[:10]
+                explanation = {k: self._sanitize_float(float(v)) for k, v in top_contrib}
         except Exception as e:
             logger.warning(f"SHAP error: {e}")
             # Fallback: use feature importance
-            top_contrib = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:5]
-            explanation = {k: float(v) for k, v in top_contrib}
+            top_contrib = sorted(importance.items(), key=lambda x: x[1] if x[1] is not None else 0, reverse=True)[:5]
+            explanation = {k: self._sanitize_float(v) if v is not None else None for k, v in top_contrib}
         
         # 3. Phân loại features: News sentiment vs Technical indicators
         news_features = [f for f in feature_names if 'sentiment' in f.lower() or 'news' in f.lower()]
         tech_features = [f for f in feature_names if f not in news_features]
         
         # Top news features
-        news_importance = {f: float(importance.get(f, 0)) for f in news_features if f in importance}
-        top_news = sorted(news_importance.items(), key=lambda x: x[1], reverse=True)[:5]
+        news_importance = {f: self._sanitize_float(float(importance.get(f, 0))) for f in news_features if f in importance}
+        top_news = sorted(news_importance.items(), key=lambda x: x[1] if x[1] is not None else 0, reverse=True)[:5]
         
         # Top technical indicators
-        tech_importance = {f: float(importance.get(f, 0)) for f in tech_features if f in importance}
-        top_tech = sorted(tech_importance.items(), key=lambda x: x[1], reverse=True)[:5]
+        tech_importance = {f: self._sanitize_float(float(importance.get(f, 0))) for f in tech_features if f in importance}
+        top_tech = sorted(tech_importance.items(), key=lambda x: x[1] if x[1] is not None else 0, reverse=True)[:5]
         
         # 4. Top 3 News Articles with Keywords
         top_news_articles = []
@@ -402,7 +426,7 @@ class PredictionPipeline:
                 title = str(row.get('title', ''))
                 url = str(row.get('url', ''))
                 published_at = str(row.get('published_at', ''))
-                sentiment_score = float(row.get('sentiment_score', 0))
+                sentiment_score = self._sanitize_float(float(row.get('sentiment_score', 0)))
                 language = str(row.get('language', 'en'))
                 
                 # Extract keywords for this specific article
@@ -448,11 +472,17 @@ class PredictionPipeline:
         # Combine scores
         confidence = (feature_coverage * 0.4 + news_availability * 0.3 + balance_score * 0.3)
         
-        return {
+        # Calculate explanation values safely
+        news_val = top_news[0][1] if top_news and top_news[0][1] is not None else 0
+        tech_val = top_tech[0][1] if top_tech and top_tech[0][1] is not None else 0
+        total_news_importance = sum(f[1] if f[1] is not None else 0 for f in top_news)
+        total_features_importance = sum(f[1] if f[1] is not None else 0 for f in top_features)
+        
+        result = {
             "prediction_horizon": f"{horizon_hours}h",
             "predicted_price": str(predicted_price),
             "current_price": str(current_price),
-            "predicted_change_pct": str((predicted_price - current_price) / current_price * 100),
+            "predicted_change_pct": str((predicted_price - current_price) / current_price * 100) if current_price != 0 else "0.0",
             "confidence_score": str(confidence),
             
             # Metadata
@@ -470,9 +500,9 @@ class PredictionPipeline:
             # XAI: Phân loại features
             "feature_analysis": {
                 # News sentiment features (ảnh hưởng mạnh nhất)
-                "top_news_features": [{"feature": f[0], "importance": float(f[1])} for f in top_news[:5]],
+                "top_news_features": [{"feature": f[0], "importance": self._sanitize_float(f[1])} for f in top_news[:5]],
                 # Technical indicators (ảnh hưởng mạnh nhất)
-                "top_technical_indicators": [{"feature": f[0], "importance": float(f[1])} for f in top_tech[:5]],
+                "top_technical_indicators": [{"feature": f[0], "importance": self._sanitize_float(f[1])} for f in top_tech[:5]],
                 # SHAP contributions (đóng góp vào prediction này)
                 "shap_contributions": explanation
             },
@@ -484,9 +514,12 @@ class PredictionPipeline:
             "explanation": {
                 "primary_factors": {
                     "most_important_feature": top_features[0][0] if top_features else None,
-                    "is_news_important": bool(len(top_news) > 0 and top_news[0][1] > (top_tech[0][1] if top_tech else 0)),
-                    "news_vs_technical": "News sentiment" if (top_news and top_news[0][1] > (top_tech[0][1] if top_tech else 0)) else "Technical indicators",
-                    "news_influence_pct": f"{(sum(f[1] for f in top_news) / sum(f[1] for f in top_features) * 100) if top_features else 0:.1f}%"
+                    "is_news_important": bool(len(top_news) > 0 and news_val > tech_val),
+                    "news_vs_technical": "News sentiment" if (top_news and news_val > tech_val) else "Technical indicators",
+                    "news_influence_pct": f"{(total_news_importance / total_features_importance * 100) if total_features_importance != 0 else 0:.1f}%"
                 }
             }
         }
+        
+        # Sanitize all float values (inf, -inf, nan) before returning
+        return self._sanitize_dict(result)

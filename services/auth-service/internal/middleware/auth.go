@@ -47,9 +47,14 @@ func AuthMiddleware(jwtManager *utils.JWTManager) gin.HandlerFunc {
 			return
 		}
 
+		role := claims.Role
+		if role == "" {
+			role = "NORMAL"
+		}
 		c.Set(authorizationPayloadKey, claims)
 		c.Set("user_id", claims.UserID)
 		c.Set("email", claims.Email)
+		c.Set("role", role)
 		c.Next()
 	}
 }
@@ -70,4 +75,30 @@ func GetEmail(c *gin.Context) (string, bool) {
 		return "", false
 	}
 	return email.(string), true
+}
+
+// GetRole retrieves role from context
+func GetRole(c *gin.Context) (string, bool) {
+	role, exists := c.Get("role")
+	if !exists {
+		return "", false
+	}
+	return role.(string), true
+}
+
+// RequireRole returns a middleware that ensures the user has one of the allowed roles
+func RequireRole(allowed ...string) gin.HandlerFunc {
+	set := make(map[string]bool)
+	for _, r := range allowed {
+		set[r] = true
+	}
+	return func(c *gin.Context) {
+		role, _ := GetRole(c)
+		if !set[role] {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden", "message": "insufficient permissions"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }

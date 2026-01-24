@@ -40,3 +40,8 @@ type SuccessResponse struct {
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
 }
+
+// UpdateRoleRequest represents request to update user role (ADMIN only, NORMAL <-> VIP)
+type UpdateRoleRequest struct {
+	Role string `json:"role" binding:"required,oneof=NORMAL VIP"`
+}

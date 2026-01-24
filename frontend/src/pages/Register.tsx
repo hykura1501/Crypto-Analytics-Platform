@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { apiClient } from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Register() {
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -36,6 +38,7 @@ export default function Register() {
         first_name: firstName || undefined,
         last_name: lastName || undefined,
       });
+      await refreshUser();
       navigate('/');
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Registration failed');
