@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import xgboost as xgb
 import shap
+from sqlalchemy import text
 
 from internal.db.database import db
 from internal.sentiment.sentiment import Analyzer
@@ -50,26 +51,26 @@ class PredictionPipeline:
     
     def load_price_data(self, symbol: str = "BTCUSDT", years: int = 2) -> pd.DataFrame:
         """Load price data from database"""
-        query = """
+        query = text("""
             SELECT symbol, time, interval, open, high, low, close, volume
             FROM market_prices
-            WHERE symbol = %s AND interval = '1h'
-            AND time >= NOW() - INTERVAL '%s years'
+            WHERE symbol = :symbol AND interval = '1h'
+            AND time >= NOW() - INTERVAL '1 year' * :years
             ORDER BY time ASC
-        """
-        df = pd.read_sql(query, db.conn, params=(symbol, years))
+        """)
+        df = pd.read_sql(query, db.engine, params={"symbol": symbol, "years": years})
         return df
     
     def load_news_data(self, days: int = 730) -> pd.DataFrame:
         """Load news data from database"""
-        query = """
+        query = text("""
             SELECT id, source_id, title, content_text, published_at, crawled_at,
                    sentiment_score, url, language
             FROM articles
-            WHERE crawled_at >= NOW() - INTERVAL '%s days'
+            WHERE crawled_at >= NOW() - INTERVAL '1 day' * :days
             ORDER BY crawled_at ASC
-        """
-        df = pd.read_sql(query, db.conn, params=(days,))
+        """)
+        df = pd.read_sql(query, db.engine, params={"days": days})
         
         # Parse time
         if 'published_at' in df.columns:

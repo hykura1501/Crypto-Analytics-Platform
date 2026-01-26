@@ -4,8 +4,8 @@ from internal.db.database import db
 from internal.sentiment.sentiment import Analyzer
 
 class NewsHandler:
-    def __init__(self):
-        self.analyzer = Analyzer()
+    def __init__(self, analyzer: Analyzer):
+        self.analyzer = analyzer
 
     def handle(self, msg_value):
         try:

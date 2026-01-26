@@ -192,6 +192,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 -O /dev/null http://localhost:9001/api/v1/ai/health || exit 1"]
       interval: 10s
@@ -205,6 +207,8 @@ services:
       - "9001:9001"
     volumes:
       - ./logs/ai-prompts:/tmp/ai-prompts
+      # Mount local models cache to container
+      - ./services/ai-service-python/models_cache:/app/models_cache
     labels:
       - "traefik.enable=true"
       # Route: /api/v1/ai/*

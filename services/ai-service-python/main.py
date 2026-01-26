@@ -13,6 +13,7 @@ from internal.handler.news_handler import NewsHandler
 from internal.handler.rss_handler import RssHandler
 from internal.handler.selector_handler import SelectorHandler
 from internal.api.server import Server
+from internal.sentiment.sentiment import Analyzer
 
 # Configure logging
 logging.basicConfig(
@@ -33,7 +34,10 @@ def main():
     consumer = KafkaConsumer()
 
     # Initialize dependencies and handlers
-    news_handler = NewsHandler()
+    logging.info("Initializing sentiment analyzer and handlers...")
+    logging.info("(This may take a while - loading ML models from HuggingFace)")
+    sentiment_handler = Analyzer()
+    news_handler = NewsHandler(sentiment_handler)
     
     gemini_client = GeminiClient(config.gemini.api_key, config.gemini.model)
     
@@ -45,7 +49,7 @@ def main():
     logging.info("=" * 60)
 
     # Create API server
-    api_server = Server(rss_handler, selector_handler)
+    api_server = Server(rss_handler, selector_handler, sentiment_handler)
     
     # Run API server in a separate thread
     api_thread = threading.Thread(target=api_server.run)

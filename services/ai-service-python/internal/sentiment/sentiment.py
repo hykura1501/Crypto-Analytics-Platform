@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import pandas as pd
+import logging
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from langdetect import detect, LangDetectException
 from underthesea import word_tokenize
@@ -21,33 +22,60 @@ class Analyzer:
     """Sentiment analysis model using pre-trained transformers (FinBERT & PhoBERT)"""
     
     def __init__(self):
+        logging.info("🧠 Initializing Sentiment Analyzer...")
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logging.info(f"📦 Device: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
         
         # Load FinBERT
-        print(f"  - Loading FinBERT model: {PREPROCESSING_CONFIG['finbert']['model_name']}...")
-        self.finbert_tokenizer = AutoTokenizer.from_pretrained(PREPROCESSING_CONFIG['finbert']['model_name'])
+        import os
+        cache_dir = os.getenv('HF_HOME', None)
+        if cache_dir:
+            logging.info(f"📥 Loading FinBERT model: {PREPROCESSING_CONFIG['finbert']['model_name']}...")
+            logging.info(f"   Using cache directory: {cache_dir}")
+        else:
+            logging.info(f"📥 Loading FinBERT model: {PREPROCESSING_CONFIG['finbert']['model_name']}...")
+            logging.info("   (This may take a while on first run - downloading from HuggingFace)")
+        
+        # HuggingFace automatically uses HF_HOME if set, but we can also pass cache_dir explicitly
+        load_kwargs = {'cache_dir': cache_dir} if cache_dir else {}
+        self.finbert_tokenizer = AutoTokenizer.from_pretrained(
+            PREPROCESSING_CONFIG['finbert']['model_name'],
+            **load_kwargs
+        )
         self.finbert_model = AutoModelForSequenceClassification.from_pretrained(
             PREPROCESSING_CONFIG['finbert']['model_name'], 
             num_labels=3,
             output_hidden_states=True,
-            output_attentions=True
+            output_attentions=True,
+            **load_kwargs
         )
         self.finbert_model.to(self.device)
         self.finbert_model.eval()
+        logging.info("✅ FinBERT model loaded")
         
         # Load PhoBERT
-        print(f"  - Loading PhoBERT model: {PREPROCESSING_CONFIG['phobert']['model_name']}...")
+        if cache_dir:
+            logging.info(f"📥 Loading PhoBERT model: {PREPROCESSING_CONFIG['phobert']['model_name']}...")
+            logging.info(f"   Using cache directory: {cache_dir}")
+        else:
+            logging.info(f"📥 Loading PhoBERT model: {PREPROCESSING_CONFIG['phobert']['model_name']}...")
+            logging.info("   (This may take a while on first run - downloading from HuggingFace)")
+        
         self.phobert_tokenizer = AutoTokenizer.from_pretrained(
             PREPROCESSING_CONFIG['phobert']['model_name'],
-            use_fast=False
+            use_fast=False,
+            **load_kwargs
         )
         self.phobert_model = AutoModelForSequenceClassification.from_pretrained(
             PREPROCESSING_CONFIG['phobert']['model_name'],
             output_hidden_states=True,
-            output_attentions=True
+            output_attentions=True,
+            **load_kwargs
         )
         self.phobert_model.to(self.device)
         self.phobert_model.eval()
+        logging.info("✅ PhoBERT model loaded")
+        logging.info("✅ Sentiment Analyzer ready")
 
     def extract_keywords(self, tokenizer, inputs, outputs, top_k=5):
         try:
@@ -88,7 +116,7 @@ class Analyzer:
                 # Clean subword tokens (## for BERT, Ġ for RoBERTa)
                 t_clean = t_lower.replace('##', '').replace('Ġ', '').replace('_', ' ').strip()
                 
-                if t_clean not in stop_words and len(t_clean) > 2 and t_clean.replace(' ', '').isalnum():
+                if t_clean not in stop_words and len(t_clean) > 4 and t_clean.replace(' ', '').isalnum():
                     if t_clean not in token_weights or cls_attention[i] > token_weights[t_clean]:
                         token_weights[t_clean] = cls_attention[i]
             
