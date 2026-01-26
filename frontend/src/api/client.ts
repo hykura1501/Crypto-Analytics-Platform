@@ -55,9 +55,15 @@ class ApiClient {
       (response) => response,
       async (error) => {
         const originalRequest = error.config;
-
+        
+        // Skip refresh for auth endpoints to avoid infinite loop
+        const authEndpoints = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'];
+        const isAuthEndpoint = authEndpoints.some(endpoint => 
+          originalRequest.url?.includes(endpoint)
+        );
+        
         // If error is 401 and we haven't tried to refresh yet
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
           if (this.isRefreshing) {
             // If already refreshing, wait for the new token
             return new Promise((resolve) => {
@@ -80,11 +86,19 @@ class ApiClient {
             const response = await this.refreshToken(refreshToken);
             const { access_token } = response;
 
-            // Update cookie
+            // Update access token cookie with correct expiry
             Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, access_token, {
-              expires: 7, // 7 days
-              httpOnly: false, // Note: js-cookie can't set httpOnly, but backend should set it
+              expires: new Date(Date.now() + response.expires_in * 1000),
+              httpOnly: false,
             });
+
+            // Update refresh token if provided
+            if (response.refresh_token) {
+              Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, response.refresh_token, {
+                expires: 7, // 7 days
+                httpOnly: false,
+              });
+            }
 
             // Notify all subscribers
             this.refreshSubscribers.forEach((cb) => cb(access_token));
@@ -96,6 +110,7 @@ class ApiClient {
           } catch (refreshError) {
             // Refresh failed, redirect to login
             this.refreshSubscribers = [];
+            this.isRefreshing = false;
             Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
             Cookies.remove(COOKIE_NAMES.REFRESH_TOKEN);
             window.location.href = "/login";
