@@ -56,62 +56,130 @@ Hệ quả:
     \item Phát tán JWT giả đến backend services
 \end{itemize}
 
-\subsection{Giải pháp kết hợp OAuth2 + JWT}
+\subsection{Giải pháp triển khai: Auth Service}
 
-\subsubsection{OAuth2 Flow với Refresh Token}
+\subsubsection{Kiến trúc Auth Service (Golang)}
 
-\begin{enumerate}
-    \item \textbf{Access Token}: Short-lived (15-30 phút)
-    \begin{itemize}
-        \item Dùng cho authentication trong requests
-        \item Stateless, verify bằng signature
-    \end{itemize}
-    
-    \item \textbf{Refresh Token}: Long-lived (7-30 ngày)
-    \begin{itemize}
-        \item Lưu trong database/Redis
-        \item Có thể revoke bất kỳ lúc nào
-        \item Dùng để lấy access token mới
-    \end{itemize}
-\end{enumerate}
+Auth Service được triển khai riêng biệt với các tính năng:
+\begin{itemize}
+    \item JWT Access Token (short-lived) + Refresh Token (long-lived)
+    \item Password hashing với bcrypt
+    \item Refresh Token lưu trong database để có thể revoke
+    \item Clean Architecture với Repository pattern
+\end{itemize}
 
-\subsubsection{Token Blacklist Implementation}
-
-\begin{lstlisting}[language=Go, caption=Token Blacklist với Redis]
-// Check if token is blacklisted
-func (h *Handler) IsTokenBlacklisted(token string) bool {
-    key := "blacklist:" + token
-    _, err := h.RedisClient.Get(context.Background(), key).Result()
-    return err == nil
+\begin{lstlisting}[language=Go, caption=Auth Service Interface (auth-service/internal/service/auth\_service.go)]
+type AuthService interface {
+    Register(req *model.RegisterRequest) (*model.User, error)
+    Login(req *model.LoginRequest) (*model.AuthResponse, error)
+    RefreshToken(refreshToken string) (*model.AuthResponse, error)
+    ValidateToken(token string) (*model.User, error)
+    Logout(refreshToken string) error
 }
 
-// Blacklist a token
-func (h *Handler) BlacklistToken(token string, exp time.Duration) error {
-    key := "blacklist:" + token
-    return h.RedisClient.Set(context.Background(), key, "1", exp).Err()
+type authService struct {
+    userRepo         repository.UserRepository
+    refreshTokenRepo repository.RefreshTokenRepository
+    jwtManager       *utils.JWTManager
 }
 
-// Middleware to check blacklist
-func AuthMiddleware(h *Handler) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        token := extractToken(c)
-        
-        // Check blacklist first
-        if h.IsTokenBlacklisted(token) {
-            c.AbortWithStatusJSON(401, gin.H{"error": "Token revoked"})
-            return
-        }
-        
-        // Verify JWT
-        claims, err := verifyJWT(token)
-        if err != nil {
-            c.AbortWithStatusJSON(401, gin.H{"error": "Invalid token"})
-            return
-        }
-        
-        c.Set("user", claims)
-        c.Next()
+func (s *authService) Login(req *model.LoginRequest) (*model.AuthResponse, error) {
+    // Find user by email
+    user, err := s.userRepo.FindByEmail(req.Email)
+    if err != nil {
+        return nil, ErrInvalidCredentials
     }
+    
+    // Check password with bcrypt
+    if err := utils.CheckPassword(req.Password, user.PasswordHash); err != nil {
+        return nil, ErrInvalidCredentials
+    }
+    
+    // Check if user is active
+    if !user.IsActive {
+        return nil, errors.New("user account is deactivated")
+    }
+    
+    // Generate tokens
+    return s.generateTokens(user)
+}
+\end{lstlisting}
+
+\subsubsection{Token Generation and Management}
+
+\begin{lstlisting}[language=Go, caption=Token Generation with Refresh Token in DB]
+func (s *authService) generateTokens(user *model.User) (*model.AuthResponse, error) {
+    // Generate short-lived access token (15-30 minutes)
+    accessToken, err := s.jwtManager.GenerateAccessToken(user.ID, user.Email)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Generate long-lived refresh token (7-30 days)
+    refreshToken, err := s.jwtManager.GenerateRefreshToken(user.ID, user.Email)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Save refresh token to database (can be revoked later)
+    tokenRecord := &model.RefreshToken{
+        UserID:    user.ID,
+        Token:     refreshToken,
+        ExpiresAt: time.Now().Add(s.jwtManager.GetRefreshExpiry()),
+    }
+    
+    if err := s.refreshTokenRepo.Create(tokenRecord); err != nil {
+        return nil, err
+    }
+    
+    return &model.AuthResponse{
+        AccessToken:  accessToken,
+        RefreshToken: refreshToken,
+        TokenType:    "Bearer",
+        ExpiresIn:    int64(s.jwtManager.GetAccessExpiry().Seconds()),
+        User:         user,
+    }, nil
+}
+\end{lstlisting}
+
+\subsubsection{Refresh Token Flow}
+
+\begin{lstlisting}[language=Go, caption=Refresh Token Validation and Rotation]
+func (s *authService) RefreshToken(refreshToken string) (*model.AuthResponse, error) {
+    // Validate JWT signature
+    claims, err := s.jwtManager.ValidateToken(refreshToken)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Check if refresh token exists in database
+    tokenRecord, err := s.refreshTokenRepo.FindByToken(refreshToken)
+    if err != nil {
+        return nil, errors.New("invalid refresh token")
+    }
+    
+    // Check if token is expired
+    if tokenRecord.ExpiresAt.Before(time.Now()) {
+        s.refreshTokenRepo.DeleteByToken(refreshToken)
+        return nil, errors.New("refresh token expired")
+    }
+    
+    // Get user
+    user, err := s.userRepo.FindByID(claims.UserID)
+    if err != nil {
+        return nil, ErrUserNotFound
+    }
+    
+    // Token Rotation: Delete old refresh token
+    s.refreshTokenRepo.DeleteByToken(refreshToken)
+    
+    // Generate new token pair
+    return s.generateTokens(user)
+}
+
+func (s *authService) Logout(refreshToken string) error {
+    // Revoke refresh token by deleting from database
+    return s.refreshTokenRepo.DeleteByToken(refreshToken)
 }
 \end{lstlisting}
 
@@ -298,5 +366,211 @@ func InternalAuthMiddleware() gin.HandlerFunc {
         \item Regular security audits
     \end{itemize}
 \end{enumerate}
+
+% ==============================================================================
+% PHẦN BỔ SUNG: QUẢN LÝ TÀI KHOẢN VIP
+% ==============================================================================
+\subsection{Quản lý Tài khoản Thường/VIP}
+
+\subsubsection{Yêu cầu phân quyền}
+
+\begin{table}[H]
+\centering
+\caption{Phân quyền tài khoản theo loại}
+\begin{tabular}{|p{4cm}|c|c|}
+\hline
+\textbf{Tính năng} & \textbf{Thường} & \textbf{VIP} \\
+\hline
+Xem biểu đồ giá realtime & \checkmark & \checkmark \\
+\hline
+Chọn cặp tiền (BTCUSDT, ETHUSDT...) & \checkmark & \checkmark \\
+\hline
+Xem đa khung thời gian & \checkmark & \checkmark \\
+\hline
+Xem danh sách tin tức & \checkmark & \checkmark \\
+\hline
+Xem AI Sentiment Analysis & $\times$ & \checkmark \\
+\hline
+Xem AI Price Prediction & $\times$ & \checkmark \\
+\hline
+Xem SHAP Explanation (XAI) & $\times$ & \checkmark \\
+\hline
+Xem Top News với Keywords & $\times$ & \checkmark \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Extended User Model Proposal}
+
+\begin{lstlisting}[language=Go, caption=Extended User Model with Role]
+type User struct {
+    ID           uint           `gorm:"primaryKey" json:"id"`
+    Email        string         `gorm:"uniqueIndex;not null" json:"email"`
+    PasswordHash string         `gorm:"not null" json:"-"`
+    FirstName    string         `json:"first_name,omitempty"`
+    LastName     string         `json:"last_name,omitempty"`
+    
+    // Role-based access control
+    Role         string         `gorm:"default:normal" json:"role"` // normal, vip, admin
+    
+    // Subscription
+    SubscribedAt *time.Time     `json:"subscribed_at,omitempty"`
+    ExpiresAt    *time.Time     `json:"expires_at,omitempty"`
+    
+    IsActive     bool           `gorm:"default:true" json:"is_active"`
+    CreatedAt    time.Time      `json:"created_at"`
+    UpdatedAt    time.Time      `json:"updated_at"`
+}
+\end{lstlisting}
+
+\subsubsection{Middleware kiểm tra Role}
+
+\begin{lstlisting}[language=Go, caption=Role-based Authorization Middleware]
+func RequireVIP() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        // Get user from context (set by auth middleware)
+        user, exists := c.Get("user")
+        if !exists {
+            c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
+            return
+        }
+        
+        u := user.(*model.User)
+        
+        // Check role
+        if u.Role != "vip" && u.Role != "admin" {
+            c.AbortWithStatusJSON(403, gin.H{
+                "error": "VIP subscription required",
+                "message": "Upgrade to VIP to access AI predictions",
+            })
+            return
+        }
+        
+        // Check subscription expiry
+        if u.ExpiresAt != nil && u.ExpiresAt.Before(time.Now()) {
+            c.AbortWithStatusJSON(403, gin.H{
+                "error": "Subscription expired",
+            })
+            return
+        }
+        
+        c.Next()
+    }
+}
+
+// Protected routes
+api.GET("/predict/:symbol", RequireVIP(), predictHandler)
+api.GET("/sentiment/:articleId", RequireVIP(), sentimentHandler)
+\end{lstlisting}
+
+\subsubsection{Frontend Protected Route}
+
+\begin{lstlisting}[language=TypeScript, caption=VIP Protected Route (React)]
+interface User {
+  id: number;
+  email: string;
+  role: 'normal' | 'vip' | 'admin';
+  expires_at?: string;
+}
+
+function VIPRoute({ children }: { children: React.ReactNode }) {
+  const user = useAuth(); // Custom hook to get current user
+  
+  if (!user) {
+    return <Navigate to="/login" />;
+  }
+  
+  if (user.role !== 'vip' && user.role !== 'admin') {
+    return (
+      <div className="upgrade-prompt">
+        <h2>VIP Feature</h2>
+        <p>Upgrade to VIP to access AI Predictions</p>
+        <button onClick={() => navigate('/upgrade')}>
+          Upgrade Now
+        </button>
+      </div>
+    );
+  }
+  
+  return <>{children}</>;
+}
+
+// Usage in App.tsx
+<Route 
+  path="/predictions" 
+  element={
+    <VIPRoute>
+      <PredictionPage />
+    </VIPRoute>
+  } 
+/>
+\end{lstlisting}
+
+\subsubsection{Conditional Rendering trong Dashboard}
+
+\begin{lstlisting}[language=TypeScript, caption=Conditional AI Panel Display]
+function Dashboard() {
+  const user = useAuth();
+  const isVIP = user?.role === 'vip' || user?.role === 'admin';
+  
+  return (
+    <div className="dashboard">
+      {/* Chart - available to all */}
+      <ChartContainer symbol={selectedSymbol} />
+      
+      {/* AI Panel - VIP only */}
+      {isVIP ? (
+        <PredictionPanel 
+          symbol={selectedSymbol} 
+          horizonHours={predictionHorizon} 
+        />
+      ) : (
+        <div className="vip-teaser">
+          <h3>AI Predictions</h3>
+          <p>Upgrade to VIP to see:</p>
+          <ul>
+            <li>Price predictions (1h, 4h, 24h)</li>
+            <li>Sentiment analysis</li>
+            <li>Key factors explanation</li>
+          </ul>
+          <button>Upgrade to VIP</button>
+        </div>
+      )}
+    </div>
+  );
+}
+\end{lstlisting}
+
+\subsubsection{API Response dựa trên Role}
+
+\begin{lstlisting}[language=Go, caption=Role-aware API Response]
+func (h *NewsHandler) GetArticle(c *gin.Context) {
+    article, _ := h.repo.FindByID(articleID)
+    
+    // Get user role
+    user := c.MustGet("user").(*model.User)
+    
+    response := gin.H{
+        "id":           article.ID,
+        "title":        article.Title,
+        "published_at": article.PublishedAt,
+        "url":          article.Url,
+    }
+    
+    // VIP only fields
+    if user.Role == "vip" || user.Role == "admin" {
+        response["sentiment_score"] = article.SentimentScore
+        response["keywords"] = article.Keywords
+        response["content_text"] = article.ContentText
+        response["ai_analysis"] = article.AIAnalysis
+    } else {
+        // Teaser for normal users
+        response["summary"] = article.Summary[:200] + "..."
+        response["vip_required"] = true
+    }
+    
+    c.JSON(200, response)
+}
+\end{lstlisting}
 
 \newpage

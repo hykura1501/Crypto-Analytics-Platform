@@ -1,0 +1,464 @@
+% =============================================================================
+% CHƯƠNG: AI PREDICTION VỚI EXPLAINABLE AI (XAI)
+% =============================================================================
+
+\section{AI PREDICTION VỚI EXPLAINABLE AI (XAI)}
+
+\subsection{Bối cảnh}
+
+Trong hệ thống phân tích tiền mã hóa, ngoài việc thu thập tin tức và phân tích sentiment, yêu cầu quan trọng là có thể:
+\begin{itemize}
+    \item Dự đoán xu hướng giá (UP/DOWN) trong các khung thời gian khác nhau (1h, 4h, 24h)
+    \item Kết hợp dữ liệu tin tức với giá lịch sử để đưa ra dự đoán chính xác hơn
+    \item \textbf{Giải thích lý do} tại sao mô hình đưa ra dự đoán đó (Explainable AI)
+\end{itemize}
+
+\subsection{Vấn đề với AI "Hộp đen"}
+
+\subsubsection{Tại sao cần Explainable AI?}
+
+\begin{enumerate}
+    \item \textbf{Thiếu tin tưởng}: Người dùng không muốn đầu tư dựa trên dự đoán mà không hiểu lý do
+    \item \textbf{Regulatory compliance}: Các quy định tài chính yêu cầu giải thích quyết định AI
+    \item \textbf{Debug và cải thiện}: Không thể cải thiện model nếu không hiểu nó hoạt động như thế nào
+    \item \textbf{Bias detection}: Phát hiện các yếu tố không mong muốn ảnh hưởng đến dự đoán
+\end{enumerate}
+
+\subsection{Giải pháp: XGBoost + SHAP Pipeline}
+
+\subsubsection{Kiến trúc Prediction Pipeline}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm,
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.8cm, align=center, font=\small, rounded corners}
+]
+
+% Data Sources
+\node[box, fill=yellow!30] (prices) {Price Data\\Binance 1h};
+\node[box, fill=cyan!30, right=2cm of prices] (news) {News Data\\Sentiment Scores};
+
+% Feature Engineering
+\node[box, fill=orange!30, below=1.5cm of prices] (techfeat) {Technical Features\\RSI, MACD, SMA};
+\node[box, fill=orange!30, below=1.5cm of news] (newsfeat) {News Features\\Sentiment MA};
+
+% Model
+\node[box, fill=green!30, below right=1.5cm and -0.5cm of techfeat] (xgboost) {XGBoost\\Regressor};
+
+% Explainer
+\node[box, fill=red!30, below=1.2cm of xgboost] (shap) {SHAP\\Explainer};
+
+% Outputs
+\node[box, fill=purple!30, below left=1.2cm and 0.5cm of shap] (prediction) {Predicted Price\\+ Confidence};
+\node[box, fill=purple!30, below right=1.2cm and 0.5cm of shap] (explanation) {Feature\\Contributions};
+
+% Arrows
+\draw[->, thick] (prices) -- (techfeat);
+\draw[->, thick] (news) -- (newsfeat);
+\draw[->, thick] (techfeat) -- (xgboost);
+\draw[->, thick] (newsfeat) -- (xgboost);
+\draw[->, thick] (xgboost) -- (shap);
+\draw[->, thick] (shap) -- (prediction);
+\draw[->, thick] (shap) -- (explanation);
+
+\end{tikzpicture}
+\caption{AI Prediction Pipeline với SHAP Explainer}
+\end{figure}
+
+\subsubsection{Prediction Pipeline Implementation}
+
+\begin{lstlisting}[language=Python, caption=Prediction Pipeline (ai-service-python/internal/prediction.py)]
+class PredictionPipeline:
+    """Prediction pipeline with XGBoost and SHAP"""
+    
+    def __init__(self, analyzer: Optional[Analyzer] = None):
+        self.models = {}  # Store models for each symbol+horizon
+        self.feature_configs = {}  # Store feature names
+        self.explainers = {}  # Store SHAP explainers
+        self.analyzer = analyzer  # Sentiment analyzer
+
+    def load_price_data(self, symbol: str = "BTCUSDT", years: int = 2):
+        """Load price data from database"""
+        query = """
+            SELECT symbol, time, interval, open, high, low, close, volume
+            FROM market_prices
+            WHERE symbol = %s AND interval = '1h'
+            AND time >= NOW() - INTERVAL '%s years'
+            ORDER BY time ASC
+        """
+        return pd.read_sql(query, db.conn, params=(symbol, years))
+    
+    def load_news_data(self, days: int = 730):
+        """Load news with sentiment scores"""
+        query = """
+            SELECT id, source_id, title, content_text, published_at,
+                   sentiment_score, url, language
+            FROM articles
+            WHERE crawled_at >= NOW() - INTERVAL '%s days'
+            ORDER BY crawled_at ASC
+        """
+        return pd.read_sql(query, db.conn, params=(days,))
+\end{lstlisting}
+
+\subsection{Feature Engineering}
+
+\subsubsection{Technical Indicators}
+
+\begin{lstlisting}[language=Python, caption=Price Feature Engineering]
+def create_price_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    """Create technical indicator features"""
+    df = df.copy().sort_values('time').reset_index(drop=True)
+    
+    # Returns
+    df['return_1h'] = df['close'].pct_change(1)
+    df['return_24h'] = df['close'].pct_change(24)
+    
+    # Volatility
+    df['volatility_24h'] = df['return_1h'].rolling(24).std()
+    
+    # Simple Moving Average
+    df['sma_7'] = df['close'].rolling(7).mean()
+    df['sma_24'] = df['close'].rolling(24).mean()
+    
+    # RSI (Relative Strength Index)
+    delta = df['close'].diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(14).mean()
+    rs = gain / loss
+    df['rsi'] = 100 - (100 / (1 + rs))
+    
+    # MACD (Moving Average Convergence Divergence)
+    ema12 = df['close'].ewm(span=12).mean()
+    ema26 = df['close'].ewm(span=26).mean()
+    df['macd'] = ema12 - ema26
+    
+    # Lag features
+    df['close_lag_1'] = df['close'].shift(1)
+    df['close_lag_24'] = df['close'].shift(24)
+    
+    return df
+\end{lstlisting}
+
+\subsubsection{News Sentiment Features}
+
+\begin{lstlisting}[language=Python, caption=News Feature Engineering with Time Alignment]
+def process_news(self, news_df: pd.DataFrame, price_df: pd.DataFrame):
+    """Process news and align with price time buckets"""
+    
+    # Round to hourly buckets for alignment
+    news_df['time_bucket'] = news_df['time'].dt.floor('1h')
+    price_df['time_bucket'] = pd.to_datetime(price_df['time']).dt.floor('1h')
+    
+    # Aggregate news sentiment per hour
+    news_agg = news_df.groupby('time_bucket').agg({
+        'sentiment': ['mean', 'count', 'std', lambda x: (x > 0.1).sum()]
+    }).reset_index()
+    news_agg.columns = ['time_bucket', 'sentiment_mean', 'news_count', 
+                        'sentiment_std', 'positive_count']
+    
+    # Merge with price
+    result = price_df.merge(news_agg, on='time_bucket', how='left')
+    result['sentiment_mean'] = result['sentiment_mean'].fillna(0)
+    result['news_count'] = result['news_count'].fillna(0)
+    
+    # Sentiment-derived features
+    result['sentiment_positive_ratio'] = result['positive_count'] / (result['news_count'] + 1)
+    
+    # Lag features for sentiment
+    result['sentiment_lag_1h'] = result['sentiment_mean'].shift(1).fillna(0)
+    result['sentiment_lag_6h'] = result['sentiment_mean'].shift(6).fillna(0)
+    
+    # Rolling features
+    result['sentiment_ma_24h'] = result['sentiment_mean'].rolling(24, min_periods=1).mean()
+    result['sentiment_std_24h'] = result['sentiment_mean'].rolling(24, min_periods=1).std()
+    
+    return result
+\end{lstlisting}
+
+\subsection{Model Training với XGBoost}
+
+\begin{lstlisting}[language=Python, caption=XGBoost Training with Feature Selection]
+def train(self, symbol: str = "BTCUSDT", horizon_hours: int = 4, years: int = 2):
+    """Train XGBoost model"""
+    
+    # Load and prepare data
+    price_df = self.load_price_data(symbol, years)
+    news_df = self.load_news_data(days=years*365)
+    
+    price_df = self.create_price_features(price_df)
+    df = self.process_news(news_df, price_df)
+    
+    # Create target: future price after horizon_hours
+    df['target'] = df['close'].shift(-horizon_hours)
+    df = df.dropna(subset=['target'])
+    
+    # Feature selection: ensure balanced news vs technical
+    feature_cols = self.select_features(df, df['target'], n=30)
+    
+    # Prepare data
+    X = df[feature_cols].fillna(0)
+    y = df['target']
+    
+    # Train/test split (80/20)
+    split_idx = int(len(X) * 0.8)
+    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+    
+    # Train XGBoost
+    model = xgb.XGBRegressor(
+        n_estimators=200, 
+        max_depth=6, 
+        learning_rate=0.05, 
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42
+    )
+    model.fit(X_train, y_train)
+    
+    # Initialize SHAP explainer
+    self.explainers[model_key] = shap.TreeExplainer(model)
+    
+    # Evaluate
+    y_pred = model.predict(X_test)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    
+    # Directional accuracy (UP/DOWN prediction)
+    direction_true = np.sign(y_test.diff().iloc[1:])
+    direction_pred = np.sign(pd.Series(y_pred).diff().iloc[1:])
+    dir_acc = (direction_true == direction_pred).mean() * 100
+    
+    return {'rmse': rmse, 'directional_accuracy': dir_acc}
+\end{lstlisting}
+
+\subsection{SHAP Explainability}
+
+\subsubsection{Giới thiệu SHAP (SHapley Additive exPlanations)}
+
+SHAP là phương pháp XAI dựa trên lý thuyết trò chơi Shapley value:
+\begin{itemize}
+    \item \textbf{Shapley Value}: Phân bổ "đóng góp" của mỗi feature vào prediction cuối cùng
+    \item \textbf{Local Explanation}: Giải thích cho từng prediction cụ thể
+    \item \textbf{Feature Importance}: Tổng hợp importance từ nhiều predictions
+\end{itemize}
+
+\textbf{Công thức Shapley Value}:
+$$\phi_i = \sum_{S \subseteq N \setminus \{i\}} \frac{|S|!(|N|-|S|-1)!}{|N|!} [v(S \cup \{i\}) - v(S)]$$
+
+Trong đó:
+\begin{itemize}
+    \item $\phi_i$: Shapley value của feature $i$
+    \item $N$: Tập tất cả features
+    \item $S$: Một subset của features (không bao gồm $i$)
+    \item $v(S)$: Giá trị prediction khi chỉ sử dụng features trong $S$
+\end{itemize}
+
+\subsubsection{SHAP Implementation}
+
+\begin{lstlisting}[language=Python, caption=SHAP Explanation trong Prediction]
+def predict(self, symbol: str = "BTCUSDT", horizon_hours: int = 4) -> Dict:
+    """Make prediction with SHAP explanation"""
+    
+    model = self.models.get(model_key)
+    explainer = self.explainers.get(model_key)
+    feature_names = self.feature_configs.get(model_key)
+    
+    # Get latest data
+    X = latest[feature_names].fillna(0)
+    
+    # Make prediction
+    current_price = float(latest['close'].iloc[0])
+    predicted_price = float(model.predict(X)[0])
+    
+    # SHAP Explanation
+    explanation = {}
+    if explainer:
+        shap_values = explainer.shap_values(X)
+        feature_contrib = dict(zip(feature_names, shap_values[0]))
+        
+        # Sort by absolute contribution
+        top_contrib = sorted(feature_contrib.items(), 
+                           key=lambda x: abs(x[1]), reverse=True)[:10]
+        explanation = {k: float(v) for k, v in top_contrib}
+    
+    # Separate News vs Technical features
+    news_features = [f for f in feature_names 
+                     if 'sentiment' in f.lower() or 'news' in f.lower()]
+    tech_features = [f for f in feature_names if f not in news_features]
+    
+    return {
+        "predicted_price": str(predicted_price),
+        "current_price": str(current_price),
+        "predicted_change_pct": str((predicted_price - current_price) / current_price * 100),
+        
+        # XAI: Feature analysis
+        "feature_analysis": {
+            "top_news_features": [...],
+            "top_technical_indicators": [...],
+            "shap_contributions": explanation  # SHAP values for each feature
+        },
+        
+        # Human-readable explanation
+        "explanation": {
+            "primary_factors": {
+                "most_important_feature": top_features[0][0],
+                "is_news_important": bool(news dominates),
+                "news_influence_pct": f"{news_pct:.1f}%"
+            }
+        }
+    }
+\end{lstlisting}
+
+\subsection{Phân tích Nhân quả (Causal Analysis)}
+
+\subsubsection{Kết hợp Tin tức và Giá}
+
+Hệ thống thực hiện phân tích nhân quả bằng cách:
+
+\begin{enumerate}
+    \item \textbf{Time-aligned Features}: Tin tức được align với khung giờ giá
+    \item \textbf{Lag Features}: Sentiment lag 1h, 6h để capture causal delay
+    \item \textbf{SHAP Contributions}: Xác định feature nào thực sự ảnh hưởng đến prediction
+\end{enumerate}
+
+\begin{lstlisting}[language=Python, caption=Causal Feature Extraction]
+# Lag features capture causal relationship
+result['sentiment_lag_1h'] = result['sentiment_mean'].shift(1)
+result['sentiment_lag_6h'] = result['sentiment_mean'].shift(6)
+
+# Rolling features for longer-term trends
+result['sentiment_ma_24h'] = result['sentiment_mean'].rolling(24).mean()
+\end{lstlisting}
+
+\subsubsection{Top News Articles với Keywords}
+
+\begin{lstlisting}[language=Python, caption=Extract Top Influential News]
+# Get recent news relevant to prediction
+lookback_hours = max(horizon_hours * 2, 48)
+cutoff_time = news_df['time'].max() - timedelta(hours=lookback_hours)
+recent_news = news_df[news_df['time'] >= cutoff_time]
+
+# Extract keywords using Attention weights
+for idx, row in recent_news.head(3).iterrows():
+    text = row['title'] + " " + row['content_text']
+    keywords, _ = self.analyzer.analyze(text, lang=row['language'], top_k=5)
+    
+    top_news_articles.append({
+        "id": row['id'],
+        "title": row['title'],
+        "sentiment_score": row['sentiment_score'],
+        "keywords": keywords[:5]  # Top 5 keywords from attention
+    })
+\end{lstlisting}
+
+\subsection{Frontend: Prediction Panel}
+
+\begin{lstlisting}[language=TypeScript, caption=PredictionPanel Component (React)]
+interface PredictionResult {
+  predicted_price: string;
+  current_price: string;
+  predicted_change_pct: string;
+  confidence_score: string;
+  explanation: {
+    primary_factors: {
+      most_important_feature: string;
+      is_news_important: boolean;
+      news_influence_pct: string;
+    }
+  };
+  top_news_articles: Array<{
+    id: number;
+    title: string;
+    sentiment_score: number;
+    keywords: string[];
+  }>;
+  feature_analysis: {
+    top_technical_indicators: Array<{ feature: string; importance: number }>;
+  };
+}
+
+// Display prediction with explanation
+<div className="prediction-panel">
+  <h3>AI Price Prediction - {symbol} • {horizonHours}h horizon</h3>
+  
+  {/* Price prediction */}
+  <p>Current: ${currentPrice}</p>
+  <p className={isPositive ? 'green' : 'red'}>
+    Predicted: ${predictedPrice} ({changePct}%)
+  </p>
+  
+  {/* Key factors - XAI */}
+  <h4>Key Factors</h4>
+  <p>Primary Factor: {prediction.explanation.primary_factors.most_important_feature}</p>
+  <p>News Influence: {prediction.explanation.primary_factors.news_influence_pct}</p>
+  
+  {/* Top news articles */}
+  <h4>Recent News ({prediction.metadata.recent_news_analyzed} analyzed)</h4>
+  {prediction.top_news_articles.map(article => (
+    <div key={article.id}>
+      <p>{article.title}</p>
+      <span>Sentiment: {article.sentiment_score}</span>
+      <span>Keywords: {article.keywords.join(', ')}</span>
+    </div>
+  ))}
+  
+  {/* Technical indicators */}
+  <h4>Top Technical Indicators</h4>
+  {prediction.feature_analysis.top_technical_indicators.map(ind => (
+    <span className="badge">{ind.feature}</span>
+  ))}
+</div>
+\end{lstlisting}
+
+\subsection{Confidence Score Calculation}
+
+\begin{lstlisting}[language=Python, caption=Multi-factor Confidence Score]
+# 1. Feature coverage (enough features?)
+feature_coverage = len(feature_names) / 30.0
+
+# 2. News availability (recent news available?)
+news_availability = min(1.0, recent_news_count / max(10, horizon_hours // 4))
+
+# 3. Balance score (model diversity?)
+news_feat_ratio = len(news_features) / len(feature_names)
+balance_score = 1.0 - abs(news_feat_ratio - 0.3)  # Ideal: 30% news features
+
+# Combined confidence
+confidence = (feature_coverage * 0.4 + news_availability * 0.3 + balance_score * 0.3)
+\end{lstlisting}
+
+\textbf{Công thức Confidence}:
+$$confidence = 0.4 \times coverage + 0.3 \times news\_availability + 0.3 \times balance$$
+
+\subsection{Kết luận}
+
+\begin{table}[H]
+\centering
+\caption{So sánh Black-box vs Explainable AI}
+\begin{tabular}{|p{4cm}|p{5cm}|p{5cm}|}
+\hline
+\textbf{Tiêu chí} & \textbf{Black-box AI} & \textbf{XAI (SHAP)} \\
+\hline
+Độ tin cậy người dùng & Thấp & Cao \\
+\hline
+Debug capability & Khó & Dễ - thấy feature contributions \\
+\hline
+Regulatory compliance & Không đạt & Đạt chuẩn \\
+\hline
+Bias detection & Không thể & Có thể phát hiện \\
+\hline
+Complexity & Thấp & Cao hơn (cần SHAP computation) \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Điểm mạnh của giải pháp}:
+\begin{itemize}
+    \item Kết hợp cả Technical Indicators và News Sentiment
+    \item SHAP explanation cho từng prediction
+    \item Hiển thị top news articles với keywords để người dùng hiểu lý do
+    \item Confidence score dựa trên nhiều yếu tố
+    \item Support multiple prediction horizons (1h, 4h, 24h)
+\end{itemize}
+
+\newpage

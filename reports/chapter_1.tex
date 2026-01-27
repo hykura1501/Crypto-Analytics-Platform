@@ -1,336 +1,394 @@
 % =============================================================================
-% CHƯƠNG 1: TÌNH HUỐNG 1 - SCALE WEBSOCKET
+% CHƯƠNG 2: TÌNH HUỐNG 2 - THU THẬP TIN TỨC
 % =============================================================================
 
-\section{TÌNH HUỐNG 1: SCALE WEBSOCKET VỚI HƠN 1000 CLIENT}
+\section{TÌNH HUỐNG 2: THU THẬP TIN TỨC TỰ ĐỘNG}
 
 \subsection{Bối cảnh}
 
-Bạn được giao xây dựng hệ thống hiển thị giá tài chính thời gian thực cho hơn 1000 người dùng đồng thời. Mỗi người có thể mở nhiều tab (BTCUSDT, ETHUSDT...) và mỗi tab sẽ mở một kết nối WebSocket riêng để nhận dữ liệu từ Binance.
+Bạn cần thu thập tin tức tài chính từ hàng trăm website khác nhau. Một số trang sử dụng JavaScript để hiển thị nội dung (Single Page App), một số thường xuyên thay đổi cấu trúc HTML. Các công cụ crawler truyền thống như XPath hoặc CSS Selector liên tục bị lỗi, cần cập nhật lại thủ công, gây tốn kém chi phí bảo trì.
 
-\subsection{Phân tích vấn đề kỹ thuật}
+Yêu cầu hệ thống có thể:
+\begin{itemize}
+    \item Tự thích ứng với thay đổi cấu trúc trang
+    \item Phân tích nội dung chính của bài viết (tiêu đề, ngày, nội dung) từ HTML hỗn tạp
+    \item Vận hành ổn định khi scale lên hàng nghìn trang cần thu thập
+\end{itemize}
 
-\subsubsection{Các thách thức khi mở rộng WebSocket}
+\subsection{Vấn đề với Crawler Truyền thống}
+
+\subsubsection{Lý do crawler truyền thống dễ bị lỗi}
 
 \begin{enumerate}
-    \item \textbf{Kết nối bền vững (Long-lived Connections)}:
+    \item \textbf{Phụ thuộc vào cấu trúc HTML}:
     \begin{itemize}
-        \item WebSocket khác với HTTP request thông thường - kết nối được duy trì liên tục
-        \item Mỗi kết nối tiêu tốn tài nguyên hệ thống (file descriptors, memory)
-        \item Không thể load balance đơn giản như HTTP
+        \item XPath và CSS Selector cố định sẽ lỗi khi website thay đổi layout
+        \item Một class name thay đổi có thể làm hỏng toàn bộ crawler
+        \item Không có khả năng tự phục hồi
     \end{itemize}
     
-    \item \textbf{Load Balancer chỉ điều phối kết nối mới}:
+    \item \textbf{JavaScript Rendering}:
     \begin{itemize}
-        \item Sau khi kết nối được thiết lập, load balancer không can thiệp được
-        \item Instance cũ có thể bị quá tải khi nhận quá nhiều kết nối
-        \item Instance mới không nhận được kết nối từ các client đã kết nối
+        \item Single Page Applications (SPA) render content bằng JavaScript
+        \item Traditional crawlers chỉ lấy được HTML tĩnh ban đầu
+        \item Cần headless browser tốn tài nguyên
     \end{itemize}
     
-    \item \textbf{Server failure và client recovery}:
+    \item \textbf{Chi phí bảo trì cao}:
     \begin{itemize}
-        \item Khi server chết, tất cả kết nối bị mất
-        \item Client cần cơ chế tự động reconnect
-        \item Không có state persistence cho WebSocket connections
-    \end{itemize}
-    
-    \item \textbf{Chi phí Pub/Sub}:
-    \begin{itemize}
-        \item Đồng bộ tin nhắn giữa các server instances tốn tài nguyên
-        \item Cần message broker (Redis Pub/Sub, Kafka) để broadcast
-        \item Latency tăng khi số lượng server tăng
+        \item Mỗi website cần cấu hình selector riêng
+        \item Phải monitor và update thủ công khi website thay đổi
+        \item Không scale được với hàng trăm nguồn tin
     \end{itemize}
 \end{enumerate}
 
-\subsubsection{Nguyên lý các giải pháp}
+\subsection{Giải pháp trong mã nguồn: Crawler Service (Golang)}
 
-\textbf{Sticky Session}
+\subsubsection{Kiến trúc Crawler Service}
+
+Crawler Service được viết bằng Golang với các đặc điểm:
 \begin{itemize}
-    \item Load balancer duy trì mapping giữa client và server instance
-    \item Client luôn được route đến cùng một server
-    \item Ưu điểm: Đơn giản, dễ triển khai
-    \item Nhược điểm: Mất cân bằng khi một số server có nhiều heavy users
+    \item Thu thập tin tức từ RSS feeds (CoinDesk, CoinTelegraph, VNExpress, VnEconomy)
+    \item Sử dụng Kafka để gửi bài viết mới đến AI Service phân tích
+    \item Gemini AI tự động phân tích CSS selectors cho mỗi nguồn tin
+    \item Concurrent crawling với goroutines
 \end{itemize}
 
-\textbf{IP Hash}
-\begin{itemize}
-    \item Hash IP của client để xác định server instance
-    \item Công thức: $server = hash(client\_ip) \mod n$
-    \item Ưu điểm: Không cần lưu trữ session state
-    \item Nhược điểm: Khi scale, nhiều kết nối bị remap
-\end{itemize}
-
-\textbf{Rendezvous Hashing (Highest Random Weight)}
-\begin{itemize}
-    \item Mỗi client tính weight cho tất cả servers: $weight(client, server_i) = hash(client + server_i)$
-    \item Client được gán cho server có weight cao nhất
-    \item Ưu điểm: Khi thêm/bớt server, chỉ $1/n$ kết nối bị remap
-    \item Nhược điểm: Phức tạp hơn trong implementation
-\end{itemize}
-
-\subsection{Giải pháp trong mã nguồn}
-
-\subsubsection{WebSocket Hub Architecture}
-
-Hệ thống sử dụng pattern \textbf{Hub} để quản lý WebSocket connections:
-
-\begin{lstlisting}[language=Go, caption=WebSocket Hub Structure (hub.go)]
-type Hub struct {
-    // Registered clients per trading pair
-    clients map[string]map[*Client]bool
-    
-    // Inbound messages from the clients
-    broadcast chan *Message
-    
-    // Register requests from the clients
-    Register chan *Client
-    
-    // Unregister requests from clients
-    Unregister chan *Client
+\begin{lstlisting}[language=Go, caption=Crawler Service Structure (crawler-service/internal/crawler/crawler.go)]
+type Service struct {
+    cfg      *config.Config
+    db       *sql.DB
+    producer *ckafka.Producer
 }
 
-func (h *Hub) Run() {
-    for {
-        select {
-        case client := <-h.Register:
-            if h.clients[client.Pair] == nil {
-                h.clients[client.Pair] = make(map[*Client]bool)
-            }
-            h.clients[client.Pair][client] = true
-            
-        case client := <-h.Unregister:
-            if clients, ok := h.clients[client.Pair]; ok {
-                if _, ok := clients[client]; ok {
-                    delete(clients, client)
-                    close(client.Send)
-                }
-            }
-            
-        case message := <-h.broadcast:
-            clients := h.clients[message.Pair]
-            for client := range clients {
-                select {
-                case client.Send <- data:
-                default:
-                    close(client.Send)
-                    delete(clients, client)
-                }
-            }
-        }
+// CrawlOnce performs one crawl cycle for all sources
+func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
+    // Query sources from database
+    sources, err := s.getSourcesFromDB(ctx)
+    if err != nil {
+        return 0, fmt.Errorf("failed to get sources from DB: %w", err)
     }
+    
+    var wg sync.WaitGroup
+    var savedCount int64 // Atomic counter
+    
+    // Process each source concurrently
+    for _, src := range sources {
+        wg.Add(1)
+        go func(source sourceMeta) {
+            defer wg.Done()
+            
+            articles := s.fetchRSS(ctx, source, source.rssURL)
+            
+            for _, article := range articles {
+                articleData, err := s.fetchArticleContent(article, source)
+                if err != nil || len(articleData.content) < 100 {
+                    continue
+                }
+                
+                id, inserted, err := s.insertArticle(ctx, article, articleData)
+                if err != nil || !inserted {
+                    continue
+                }
+                
+                atomic.AddInt64(&savedCount, 1)
+                
+                // Send to Kafka for AI analysis
+                s.producer.SendNewArticle(id, article.Title, articleData.content)
+            }
+        }(src)
+    }
+    
+    wg.Wait()
+    return int(savedCount), nil
 }
 \end{lstlisting}
 
-\textbf{Phân tích thiết kế}:
-\begin{itemize}
-    \item \textbf{Channel-based communication}: Sử dụng Go channels để xử lý concurrent operations an toàn
-    \item \textbf{Per-pair client grouping}: Clients được nhóm theo trading pair, giúp broadcast hiệu quả
-    \item \textbf{Non-blocking send}: Sử dụng select với default case để tránh blocking khi client chậm
-    \item \textbf{Automatic cleanup}: Client không nhận được message sẽ bị remove tự động
-\end{itemize}
+\subsubsection{Kafka Integration}
 
-\subsubsection{Client Pump Pattern}
-
-\begin{lstlisting}[language=Go, caption=Client ReadPump và WritePump (client.go)]
-const (
-    writeWait = 10 * time.Second
-    pongWait = 60 * time.Second
-    pingPeriod = (pongWait * 9) / 10
-    maxMessageSize = 512 * 1024
-)
-
-func (c *Client) ReadPump() {
-    defer func() {
-        c.Hub.Unregister <- c
-        c.Conn.Close()
-    }()
-    
-    c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-    c.Conn.SetPongHandler(func(string) error {
-        c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-        return nil
-    })
-    
-    for {
-        _, _, err := c.Conn.ReadMessage()
-        if err != nil {
-            break
-        }
-    }
+\begin{lstlisting}[language=Go, caption=Kafka Producer (crawler-service/internal/kafka/producer.go)]
+type Producer struct {
+    producer *kafka.Producer
+    topic    string
 }
 
-func (c *Client) WritePump() {
-    ticker := time.NewTicker(pingPeriod)
-    defer func() {
-        ticker.Stop()
-        c.Conn.Close()
-    }()
-    
-    for {
-        select {
-        case message, ok := <-c.Send:
-            if !ok {
-                c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
-                return
-            }
-            // Write message with batching
-            w, _ := c.Conn.NextWriter(websocket.TextMessage)
-            w.Write(message)
-            n := len(c.Send)
-            for i := 0; i < n; i++ {
-                w.Write(<-c.Send)
-            }
-            w.Close()
-            
-        case <-ticker.C:
-            c.Conn.WriteMessage(websocket.PingMessage, nil)
-        }
+func (p *Producer) SendNewArticle(articleID int64, title, content string) error {
+    msg := map[string]interface{}{
+        "article_id": articleID,
+        "title":      title,
+        "content":    content,
+        "timestamp":  time.Now().Unix(),
     }
+    
+    value, _ := json.Marshal(msg)
+    
+    return p.producer.Produce(&kafka.Message{
+        TopicPartition: kafka.TopicPartition{
+            Topic: &p.topic, Partition: kafka.PartitionAny,
+        },
+        Value: value,
+    }, nil)
 }
 \end{lstlisting}
 
-\textbf{Các kỹ thuật tối ưu}:
+\subsubsection{Gemini AI cho CSS Selector Analysis}
+
+\begin{lstlisting}[language=Python, caption=Gemini Client (ai-service-python/internal/gemini/gemini_client.py)]
+import google.generativeai as genai
+
+class GeminiClient:
+    def __init__(self, api_key, model_name):
+        if not model_name:
+            model_name = "gemini-1.5-flash"
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(model_name)
+
+    def generate_content(self, prompt, config=None):
+        response = self.model.generate_content(prompt, generation_config=config)
+        if not response.candidates:
+            raise Exception("no candidates returned")
+        return response.text
+\end{lstlisting}
+
+Khi thêm nguồn tin mới, hệ thống sẽ:
 \begin{enumerate}
-    \item \textbf{Ping/Pong Heartbeat}: Duy trì kết nối với interval 54 giây
-    \item \textbf{Message Batching}: Gộp nhiều message thành một write operation
-    \item \textbf{Deadline Management}: Timeout cho read/write operations
-    \item \textbf{Graceful Cleanup}: Proper resource cleanup khi connection đóng
+    \item Gửi HTML sample đến Gemini AI qua Kafka
+    \item Gemini phân tích và trả về CSS selectors phù hợp
+    \item Lưu selectors vào database để sử dụng cho các lần crawl sau
 \end{enumerate}
 
-\subsubsection{Frontend WebSocket Reconnection}
+\subsection{AI-based Sentiment Analysis}
 
-\begin{lstlisting}[language=TypeScript, caption=useWebSocket Hook (useWebSocket.ts)]
-export function useWebSocket(url: string) {
-    const [data, setData] = useState<any>(null)
-    const wsRef = useRef<WebSocket | null>(null)
-    const reconnectTimeoutRef = useRef<number>()
-    
-    useEffect(() => {
-        const connect = () => {
-            const ws = new WebSocket(wsUrl)
-            
-            ws.onopen = () => {
-                console.log('WebSocket connected')
-            }
-            
-            ws.onmessage = (event) => {
-                const parsed = JSON.parse(event.data)
-                setData(parsed)
-            }
-            
-            ws.onclose = () => {
-                // Auto reconnect after 3 seconds
-                reconnectTimeoutRef.current = setTimeout(connect, 3000)
-            }
-            
-            wsRef.current = ws
-        }
-        
-        connect()
-        
-        return () => {
-            clearTimeout(reconnectTimeoutRef.current)
-            wsRef.current?.close()
-        }
-    }, [url])
-    
-    return data
+\subsubsection{AI Service với FinBERT và PhoBERT}
+
+AI Service sử dụng các pre-trained transformer models cho sentiment analysis đa ngôn ngữ:
+
+\begin{lstlisting}[language=Python, caption=Sentiment Analyzer (ai-service-python/internal/sentiment/sentiment.py)]
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from langdetect import detect
+from underthesea import word_tokenize
+
+PREPROCESSING_CONFIG = {
+    'finbert': {
+        'model_name': 'yiyanghkust/finbert-tone',
+        'max_length': 512,
+    },
+    'phobert': {
+        'model_name': 'wonrax/phobert-base-vietnamese-sentiment',
+        'max_length': 256,
+    }
 }
+
+class Analyzer:
+    """Sentiment analysis using FinBERT (English) & PhoBERT (Vietnamese)"""
+    
+    def __init__(self):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Load FinBERT for English financial text
+        self.finbert_tokenizer = AutoTokenizer.from_pretrained(
+            PREPROCESSING_CONFIG['finbert']['model_name'])
+        self.finbert_model = AutoModelForSequenceClassification.from_pretrained(
+            PREPROCESSING_CONFIG['finbert']['model_name'], 
+            num_labels=3,
+            output_hidden_states=True,
+            output_attentions=True
+        )
+        self.finbert_model.to(self.device)
+        
+        # Load PhoBERT for Vietnamese text
+        self.phobert_tokenizer = AutoTokenizer.from_pretrained(
+            PREPROCESSING_CONFIG['phobert']['model_name'],
+            use_fast=False
+        )
+        self.phobert_model = AutoModelForSequenceClassification.from_pretrained(
+            PREPROCESSING_CONFIG['phobert']['model_name'],
+            output_hidden_states=True,
+            output_attentions=True
+        )
+        self.phobert_model.to(self.device)
+    
+    def analyze(self, text):
+        # Detect language
+        lang = detect(text)
+        
+        if lang == 'vi':
+            # Vietnamese: Use PhoBERT
+            text = word_tokenize(text, format="text")
+            return self._analyze_with_model(
+                text, self.phobert_tokenizer, self.phobert_model)
+        else:
+            # English: Use FinBERT
+            return self._analyze_with_model(
+                text, self.finbert_tokenizer, self.finbert_model)
 \end{lstlisting}
 
-\subsection{Kiến trúc đề xuất cho Scale WebSocket trên Kubernetes}
+\subsubsection{Attention-based Keyword Extraction}
+
+\begin{lstlisting}[language=Python, caption=Keyword Extraction from Attention Weights]
+def extract_keywords(self, tokenizer, inputs, outputs, top_k=5):
+    # Get attention weights from the last layer
+    attentions = outputs.attentions[-1]
+    
+    # Average over heads: [batch_size, seq_len, seq_len]
+    attentions_mean = attentions.mean(dim=1)
+    
+    # Get attention of [CLS] token to other tokens
+    cls_attention = attentions_mean[0, 0, :].detach().cpu().numpy()
+    
+    # Get tokens and filter stopwords
+    input_ids = inputs['input_ids'][0]
+    tokens = tokenizer.convert_ids_to_tokens(input_ids)
+    
+    token_weights = {}
+    for i, t in enumerate(tokens):
+        t_clean = t.lower().replace('##', '').replace('_', ' ').strip()
+        if t_clean not in stop_words and len(t_clean) > 2:
+            token_weights[t_clean] = cls_attention[i]
+    
+    # Return top-k keywords by attention weight
+    sorted_kws = sorted(token_weights.items(), 
+                        key=lambda x: x[1], reverse=True)
+    return [kw for kw, weight in sorted_kws[:top_k]]
+\end{lstlisting}
+
+\subsubsection{Kafka Consumer cho AI Processing}
+
+\begin{lstlisting}[language=Python, caption=AI Service Main Loop (ai-service-python/main.py)]
+def main():
+    logging.info("Starting AI Service (Python)...")
+    
+    # Initialize database and Kafka consumer
+    db.init()
+    consumer = KafkaConsumer()
+    
+    # Initialize handlers
+    news_handler = NewsHandler()  # Sentiment analysis
+    gemini_client = GeminiClient(config.gemini.api_key, config.gemini.model)
+    rss_handler = RssHandler(gemini_client)       # RSS structure analysis
+    selector_handler = SelectorHandler(gemini_client)  # CSS selector analysis
+    
+    # Main consumption loop
+    while True:
+        msg, err = consumer.read_message()
+        if err:
+            time.sleep(2)
+            continue
+        
+        topic = msg.topic()
+        value = msg.value().decode('utf-8')
+        
+        if topic == "news_new_article":
+            news_handler.handle(value)  # Analyze sentiment
+        elif topic == "news_analyze_rss_structure":
+            rss_handler.handle(json.loads(value))
+        elif topic == "news_analyze_css_selector":
+            selector_handler.handle(json.loads(value))
+\end{lstlisting}
+
+\subsubsection{News-Price Alignment}
+
+\begin{lstlisting}[language=Python, caption=Correlation Analysis]
+def align_news_with_price(self, pair_id, time_window_hours=24):
+    """
+    Align tin tuc voi gia lich su de phan tich tuong quan
+    """
+    # Get price before news
+    cur.execute("""
+        SELECT price FROM price_history
+        WHERE pair_id = %s AND timestamp <= %s
+        ORDER BY timestamp DESC LIMIT 1
+    """, (pair_id, published_at))
+    price_before = cur.fetchone()[0]
+    
+    # Get price after news
+    time_after = published_at + timedelta(hours=time_window_hours)
+    cur.execute("""
+        SELECT price FROM price_history
+        WHERE pair_id = %s AND timestamp >= %s AND timestamp <= %s
+        ORDER BY timestamp DESC LIMIT 1
+    """, (pair_id, published_at, time_after))
+    price_after = cur.fetchone()[0]
+    
+    # Calculate correlation
+    price_change = ((price_after - price_before) / price_before) * 100
+    
+    if sentiment_label == 'positive' and price_change > 0:
+        correlation = min(abs(sentiment_score) * abs(price_change) / 10, 1.0)
+    elif sentiment_label == 'negative' and price_change < 0:
+        correlation = min(abs(sentiment_score) * abs(price_change) / 10, 1.0)
+\end{lstlisting}
+
+\textbf{Lưu ý:} Chi tiết về AI Prediction Pipeline với XGBoost và SHAP Explainable AI được trình bày trong chương riêng "AI PREDICTION VỚI EXPLAINABLE AI (XAI)".
+
+\subsection{So sánh Rule-based vs AI-based Parser}
+
+\begin{table}[H]
+\centering
+\caption{So sánh các phương pháp trích xuất nội dung}
+\begin{tabular}{|p{3cm}|p{5cm}|p{5cm}|}
+\hline
+\textbf{Tiêu chí} & \textbf{Rule-based (XPath/CSS)} & \textbf{AI-based (LLM/ML)} \\
+\hline
+Độ chính xác ban đầu & Cao (nếu selector đúng) & Trung bình-Cao \\
+\hline
+Khả năng thích ứng & Thấp - phải update thủ công & Cao - tự học cấu trúc mới \\
+\hline
+Chi phí vận hành & Cao (bảo trì liên tục) & Thấp (sau khi train) \\
+\hline
+Tốc độ & Rất nhanh & Chậm hơn (inference time) \\
+\hline
+Resource & Thấp & Cao (GPU/CPU) \\
+\hline
+Scale & Khó - mỗi site cần config & Dễ - một model cho nhiều site \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Kiến trúc Crawler đề xuất}
 
 \begin{figure}[H]
 \centering
 \begin{tikzpicture}[
-    node distance=1.5cm,
-    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.8cm, align=center},
-    bigbox/.style={rectangle, draw, dashed, minimum width=6cm, minimum height=3cm}
+    node distance=1.2cm,
+    box/.style={rectangle, draw, minimum width=2.8cm, minimum height=0.8cm, align=center, font=\small}
 ]
 
-% Load Balancer
-\node[box, fill=orange!30] (lb) {Load Balancer\\(Nginx/HAProxy)};
-
-% WebSocket Servers
-\node[box, fill=blue!30, below left=2cm and 1cm of lb] (ws1) {WS Server 1};
-\node[box, fill=blue!30, below=2cm of lb] (ws2) {WS Server 2};
-\node[box, fill=blue!30, below right=2cm and 1cm of lb] (ws3) {WS Server N};
-
-% Redis Pub/Sub
-\node[box, fill=red!30, below=2cm of ws2] (redis) {Redis Pub/Sub\\Message Broker};
-
-% Database
-\node[box, fill=gray!30, below=1.5cm of redis] (db) {PostgreSQL};
-
-% Clients
-\node[above=1.5cm of lb] (clients) {1000+ Clients};
+% Components
+\node[box, fill=purple!30] (scheduler) {Crawl Scheduler\\(Cron/Schedule)};
+\node[box, fill=orange!30, right=2cm of scheduler] (queue) {URL Queue\\(Redis/RabbitMQ)};
+\node[box, fill=blue!30, below=1.5cm of queue] (engine) {Crawler Engine\\(Python/Scrapy)};
+\node[box, fill=red!30, left=2cm of engine] (parser) {AI Parser\\(LLM/VADER)};
+\node[box, fill=gray!30, below=1.5cm of engine] (store) {Data Store\\(PostgreSQL)};
 
 % Arrows
-\draw[->] (clients) -- (lb);
-\draw[->] (lb) -- (ws1);
-\draw[->] (lb) -- (ws2);
-\draw[->] (lb) -- (ws3);
-\draw[<->] (ws1) -- (redis);
-\draw[<->] (ws2) -- (redis);
-\draw[<->] (ws3) -- (redis);
-\draw[->] (redis) -- (db);
+\draw[->] (scheduler) -- node[above]{\tiny URLs} (queue);
+\draw[->] (queue) -- node[right]{\tiny Fetch} (engine);
+\draw[->] (engine) -- node[above]{\tiny HTML} (parser);
+\draw[->] (parser) -- node[left]{\tiny Parsed Data} (store);
+\draw[->] (engine) -- node[right]{\tiny Raw Data} (store);
 
 \end{tikzpicture}
-\caption{Kiến trúc WebSocket Scale trên Kubernetes}
+\caption{Kiến trúc Crawler với AI Parser}
 \end{figure}
 
-\subsubsection{Các thành phần trong kiến trúc}
+\subsection{Kết luận Tình huống 2}
 
-\begin{enumerate}
-    \item \textbf{WebSocket Gateway (Load Balancer)}:
-    \begin{itemize}
-        \item Sử dụng Nginx hoặc HAProxy với sticky session
-        \item Hash-based routing dựa trên user ID hoặc trading pair
-        \item Health check để detect failed instances
-    \end{itemize}
-    
-    \item \textbf{WebSocket Server Cluster}:
-    \begin{itemize}
-        \item Horizontal Pod Autoscaler (HPA) trong Kubernetes
-        \item Mỗi pod xử lý tối đa 500-1000 connections
-        \item Graceful shutdown để migrate connections
-    \end{itemize}
-    
-    \item \textbf{Message Broker (Redis Pub/Sub)}:
-    \begin{itemize}
-        \item Broadcast messages giữa các server instances
-        \item Channel per trading pair: \texttt{price:BTCUSDT}
-        \item Low latency pub/sub mechanism
-    \end{itemize}
-    
-    \item \textbf{Hash Routing Strategy}:
-    \begin{itemize}
-        \item Consistent hashing để minimize remap khi scale
-        \item Virtual nodes để cân bằng load
-        \item Custom load balancer cho WebSocket
-    \end{itemize}
-\end{enumerate}
+\textbf{Khi nào dùng AI-based parser?}
+\begin{itemize}
+    \item Thu thập từ nhiều nguồn (>50 websites)
+    \item Website thường xuyên thay đổi cấu trúc
+    \item Cần extract semantic meaning, không chỉ text
+    \item Budget cho AI inference không phải vấn đề
+\end{itemize}
 
-\subsection{Kết luận Tình huống 1}
-
-\begin{table}[H]
-\centering
-\caption{Metrics của giải pháp WebSocket}
-\begin{tabular}{|l|l|}
-\hline
-\textbf{Metric} & \textbf{Giá trị} \\
-\hline
-Số lượng client hỗ trợ & 5000+ (với 10 server instances) \\
-\hline
-Độ trễ trung bình & < 50ms (trong cùng region) \\
-\hline
-Khả năng chịu lỗi & Có - Auto reconnect trong 3 giây \\
-\hline
-Scale strategy & Horizontal với consistent hashing \\
-\hline
-Message throughput & 10,000+ messages/second \\
-\hline
-\end{tabular}
-\end{table}
+\textbf{Khi nào dùng Rule-based?}
+\begin{itemize}
+    \item Số lượng nguồn ít, ổn định (<10)
+    \item Website có cấu trúc chuẩn, ít thay đổi
+    \item Cần tốc độ cao, real-time crawling
+    \item Resource hạn chế
+\end{itemize}
 
 \newpage

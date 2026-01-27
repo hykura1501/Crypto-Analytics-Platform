@@ -42,178 +42,249 @@ Yêu cầu hệ thống có thể:
     \end{itemize}
 \end{enumerate}
 
-\subsection{Giải pháp trong mã nguồn: Adaptive Crawler}
+\subsection{Giải pháp trong mã nguồn: Crawler Service (Golang)}
 
 \subsubsection{Kiến trúc Crawler Service}
 
-\begin{lstlisting}[language=Python, caption=News Crawler Class (crawler/main.py)]
-class NewsCrawler:
+Crawler Service được viết bằng Golang với các đặc điểm:
+\begin{itemize}
+    \item Thu thập tin tức từ RSS feeds (CoinDesk, CoinTelegraph, VNExpress, VnEconomy)
+    \item Sử dụng Kafka để gửi bài viết mới đến AI Service phân tích
+    \item Gemini AI tự động phân tích CSS selectors cho mỗi nguồn tin
+    \item Concurrent crawling với goroutines
+\end{itemize}
+
+\begin{lstlisting}[language=Go, caption=Crawler Service Structure (crawler-service/internal/crawler/crawler.go)]
+type Service struct {
+    cfg      *config.Config
+    db       *sql.DB
+    producer *ckafka.Producer
+}
+
+// CrawlOnce performs one crawl cycle for all sources
+func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
+    // Query sources from database
+    sources, err := s.getSourcesFromDB(ctx)
+    if err != nil {
+        return 0, fmt.Errorf("failed to get sources from DB: %w", err)
+    }
+    
+    var wg sync.WaitGroup
+    var savedCount int64 // Atomic counter
+    
+    // Process each source concurrently
+    for _, src := range sources {
+        wg.Add(1)
+        go func(source sourceMeta) {
+            defer wg.Done()
+            
+            articles := s.fetchRSS(ctx, source, source.rssURL)
+            
+            for _, article := range articles {
+                articleData, err := s.fetchArticleContent(article, source)
+                if err != nil || len(articleData.content) < 100 {
+                    continue
+                }
+                
+                id, inserted, err := s.insertArticle(ctx, article, articleData)
+                if err != nil || !inserted {
+                    continue
+                }
+                
+                atomic.AddInt64(&savedCount, 1)
+                
+                // Send to Kafka for AI analysis
+                s.producer.SendNewArticle(id, article.Title, articleData.content)
+            }
+        }(src)
+    }
+    
+    wg.Wait()
+    return int(savedCount), nil
+}
+\end{lstlisting}
+
+\subsubsection{Kafka Integration}
+
+\begin{lstlisting}[language=Go, caption=Kafka Producer (crawler-service/internal/kafka/producer.go)]
+type Producer struct {
+    producer *kafka.Producer
+    topic    string
+}
+
+func (p *Producer) SendNewArticle(articleID int64, title, content string) error {
+    msg := map[string]interface{}{
+        "article_id": articleID,
+        "title":      title,
+        "content":    content,
+        "timestamp":  time.Now().Unix(),
+    }
+    
+    value, _ := json.Marshal(msg)
+    
+    return p.producer.Produce(&kafka.Message{
+        TopicPartition: kafka.TopicPartition{
+            Topic: &p.topic, Partition: kafka.PartitionAny,
+        },
+        Value: value,
+    }, nil)
+}
+\end{lstlisting}
+
+\subsubsection{Gemini AI cho CSS Selector Analysis}
+
+\begin{lstlisting}[language=Python, caption=Gemini Client (ai-service-python/internal/gemini/gemini_client.py)]
+import google.generativeai as genai
+
+class GeminiClient:
+    def __init__(self, api_key, model_name):
+        if not model_name:
+            model_name = "gemini-1.5-flash"
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(model_name)
+
+    def generate_content(self, prompt, config=None):
+        response = self.model.generate_content(prompt, generation_config=config)
+        if not response.candidates:
+            raise Exception("no candidates returned")
+        return response.text
+\end{lstlisting}
+
+Khi thêm nguồn tin mới, hệ thống sẽ:
+\begin{enumerate}
+    \item Gửi HTML sample đến Gemini AI qua Kafka
+    \item Gemini phân tích và trả về CSS selectors phù hợp
+    \item Lưu selectors vào database để sử dụng cho các lần crawl sau
+\end{enumerate}
+
+\subsection{AI-based Sentiment Analysis}
+
+\subsubsection{AI Service với FinBERT và PhoBERT}
+
+AI Service sử dụng các pre-trained transformer models cho sentiment analysis đa ngôn ngữ:
+
+\begin{lstlisting}[language=Python, caption=Sentiment Analyzer (ai-service-python/internal/sentiment/sentiment.py)]
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from langdetect import detect
+from underthesea import word_tokenize
+
+PREPROCESSING_CONFIG = {
+    'finbert': {
+        'model_name': 'yiyanghkust/finbert-tone',
+        'max_length': 512,
+    },
+    'phobert': {
+        'model_name': 'wonrax/phobert-base-vietnamese-sentiment',
+        'max_length': 256,
+    }
+}
+
+class Analyzer:
+    """Sentiment analysis using FinBERT (English) & PhoBERT (Vietnamese)"""
+    
     def __init__(self):
-        self.db_url = os.getenv('DATABASE_URL')
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-        })
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Load FinBERT for English financial text
+        self.finbert_tokenizer = AutoTokenizer.from_pretrained(
+            PREPROCESSING_CONFIG['finbert']['model_name'])
+        self.finbert_model = AutoModelForSequenceClassification.from_pretrained(
+            PREPROCESSING_CONFIG['finbert']['model_name'], 
+            num_labels=3,
+            output_hidden_states=True,
+            output_attentions=True
+        )
+        self.finbert_model.to(self.device)
+        
+        # Load PhoBERT for Vietnamese text
+        self.phobert_tokenizer = AutoTokenizer.from_pretrained(
+            PREPROCESSING_CONFIG['phobert']['model_name'],
+            use_fast=False
+        )
+        self.phobert_model = AutoModelForSequenceClassification.from_pretrained(
+            PREPROCESSING_CONFIG['phobert']['model_name'],
+            output_hidden_states=True,
+            output_attentions=True
+        )
+        self.phobert_model.to(self.device)
     
-    def learn_structure(self, html_content, sample_data):
-        """
-        Tu dong hoc cau truc HTML cua trang
-        Tim cac selector phu hop de trich xuat thong tin
-        """
-        soup = BeautifulSoup(html_content, 'html.parser')
+    def analyze(self, text):
+        # Detect language
+        lang = detect(text)
         
-        # Tim title selector
-        title_selectors = [
-            'h1', 'h2', 'h3',
-            '[class*="title"]', '[class*="headline"]',
-            'article h1', 'article h2'
-        ]
-        
-        # Tim content selector
-        content_selectors = [
-            'article', '[class*="content"]', '[class*="body"]',
-            'main', '.post-content', '.article-body'
-        ]
-        
-        # Tim link selector
-        link_selectors = [
-            'a[href]', 'h2 a', 'h3 a', '.title a'
-        ]
-        
-        return {
-            'title_selectors': title_selectors,
-            'content_selectors': content_selectors,
-            'link_selectors': link_selectors
-        }
+        if lang == 'vi':
+            # Vietnamese: Use PhoBERT
+            text = word_tokenize(text, format="text")
+            return self._analyze_with_model(
+                text, self.phobert_tokenizer, self.phobert_model)
+        else:
+            # English: Use FinBERT
+            return self._analyze_with_model(
+                text, self.finbert_tokenizer, self.finbert_model)
 \end{lstlisting}
 
-\subsubsection{Retry Mechanism với Exponential Backoff}
+\subsubsection{Attention-based Keyword Extraction}
 
-\begin{lstlisting}[language=Python, caption=Database Connection với Retry Logic]
-def get_db_connection(self, max_retries=5):
-    """Ket noi database voi retry logic"""
-    for attempt in range(max_retries):
-        try:
-            conn = psycopg2.connect(self.db_url)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.close()
-            return conn
-        except (psycopg2.OperationalError, psycopg2.DatabaseError) as e:
-            if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff
-                print(f"Retry in {wait_time} seconds...")
-                time.sleep(wait_time)
-            else:
-                raise
+\begin{lstlisting}[language=Python, caption=Keyword Extraction from Attention Weights]
+def extract_keywords(self, tokenizer, inputs, outputs, top_k=5):
+    # Get attention weights from the last layer
+    attentions = outputs.attentions[-1]
+    
+    # Average over heads: [batch_size, seq_len, seq_len]
+    attentions_mean = attentions.mean(dim=1)
+    
+    # Get attention of [CLS] token to other tokens
+    cls_attention = attentions_mean[0, 0, :].detach().cpu().numpy()
+    
+    # Get tokens and filter stopwords
+    input_ids = inputs['input_ids'][0]
+    tokens = tokenizer.convert_ids_to_tokens(input_ids)
+    
+    token_weights = {}
+    for i, t in enumerate(tokens):
+        t_clean = t.lower().replace('##', '').replace('_', ' ').strip()
+        if t_clean not in stop_words and len(t_clean) > 2:
+            token_weights[t_clean] = cls_attention[i]
+    
+    # Return top-k keywords by attention weight
+    sorted_kws = sorted(token_weights.items(), 
+                        key=lambda x: x[1], reverse=True)
+    return [kw for kw, weight in sorted_kws[:top_k]]
 \end{lstlisting}
 
-\textbf{Công thức Exponential Backoff}:
-$$wait\_time = 2^{attempt} \text{ seconds}$$
+\subsubsection{Kafka Consumer cho AI Processing}
 
-Với 5 lần retry: 2s $\rightarrow$ 4s $\rightarrow$ 8s $\rightarrow$ 16s $\rightarrow$ Fail
-
-\subsubsection{Crawling Process}
-
-\begin{lstlisting}[language=Python, caption=Crawl Source Implementation]
-def crawl_source(self, source_id):
-    conn = self.get_db_connection()
-    cur = conn.cursor()
+\begin{lstlisting}[language=Python, caption=AI Service Main Loop (ai-service-python/main.py)]
+def main():
+    logging.info("Starting AI Service (Python)...")
     
-    try:
-        # Lay thong tin source tu database
-        cur.execute("""
-            SELECT id, name, url, title_selector, content_selector, 
-                   date_selector, link_selector
-            FROM news_sources 
-            WHERE id = %s AND status = 'active'
-        """, (source_id,))
-        source = cur.fetchone()
-        
-        # Fetch homepage
-        response = self.session.get(url, timeout=30)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Tim article links (max 20)
-        article_links = []
-        links = soup.select(link_selector)
-        for link in links[:20]:
-            href = link.get('href', '')
-            full_url = urljoin(url, href)
-            article_links.append({'url': full_url, 'title': link.text})
-        
-        # Process each article
-        for article in article_links:
-            # Check duplicate
-            cur.execute("SELECT id FROM news WHERE url = %s", 
-                       (article['url'],))
-            if cur.fetchone():
-                continue
-            
-            # Fetch and extract
-            article_resp = self.session.get(article['url'], timeout=30)
-            # Extract title, content, date
-            # Save to database
-            
-            time.sleep(1)  # Rate limiting
-    finally:
-        cur.close()
-        conn.close()
-\end{lstlisting}
-
-\subsubsection{Scheduled Crawling}
-
-\begin{lstlisting}[language=Python, caption=Scheduler Implementation]
-def run_scheduler(self):
-    """Chay crawler theo lich"""
-    # Crawl moi 30 phut
-    schedule.every(30).minutes.do(self.crawl_all_sources)
+    # Initialize database and Kafka consumer
+    db.init()
+    consumer = KafkaConsumer()
     
-    # Crawl ngay lap tuc
-    self.crawl_all_sources()
+    # Initialize handlers
+    news_handler = NewsHandler()  # Sentiment analysis
+    gemini_client = GeminiClient(config.gemini.api_key, config.gemini.model)
+    rss_handler = RssHandler(gemini_client)       # RSS structure analysis
+    selector_handler = SelectorHandler(gemini_client)  # CSS selector analysis
     
+    # Main consumption loop
     while True:
-        schedule.run_pending()
-        time.sleep(60)
-\end{lstlisting}
-
-\subsection{AI-based Content Extraction}
-
-\subsubsection{AI Analysis Service}
-
-\begin{lstlisting}[language=Python, caption=Sentiment Analysis với VADER và TextBlob]
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from textblob import TextBlob
-
-vader_analyzer = SentimentIntensityAnalyzer()
-
-def analyze_sentiment(self, text):
-    """
-    Phan tich sentiment cua text
-    Returns: sentiment_label, sentiment_score (-1 to 1)
-    """
-    if not text or len(text.strip()) < 10:
-        return 'neutral', 0.0
-    
-    # VADER sentiment analysis
-    vader_scores = vader_analyzer.polarity_scores(text)
-    
-    # TextBlob sentiment analysis
-    blob = TextBlob(text)
-    blob_polarity = blob.sentiment.polarity
-    
-    # Combine scores
-    combined_score = (vader_scores['compound'] + blob_polarity) / 2
-    
-    # Classify
-    if combined_score >= 0.05:
-        label = 'positive'
-    elif combined_score <= -0.05:
-        label = 'negative'
-    else:
-        label = 'neutral'
-    
-    return label, float(combined_score)
+        msg, err = consumer.read_message()
+        if err:
+            time.sleep(2)
+            continue
+        
+        topic = msg.topic()
+        value = msg.value().decode('utf-8')
+        
+        if topic == "news_new_article":
+            news_handler.handle(value)  # Analyze sentiment
+        elif topic == "news_analyze_rss_structure":
+            rss_handler.handle(json.loads(value))
+        elif topic == "news_analyze_css_selector":
+            selector_handler.handle(json.loads(value))
 \end{lstlisting}
 
 \subsubsection{News-Price Alignment}
@@ -221,7 +292,7 @@ def analyze_sentiment(self, text):
 \begin{lstlisting}[language=Python, caption=Correlation Analysis]
 def align_news_with_price(self, pair_id, time_window_hours=24):
     """
-    Align tin tuc voi gia lich su de phan tich tuong quan
+    Align news with historical price for correlation analysis
     """
     # Get price before news
     cur.execute("""
@@ -249,103 +320,7 @@ def align_news_with_price(self, pair_id, time_window_hours=24):
         correlation = min(abs(sentiment_score) * abs(price_change) / 10, 1.0)
 \end{lstlisting}
 
-\subsection{AI Trend Prediction - Dự đoán xu hướng}
-
-Hệ thống sử dụng kết hợp phân tích sentiment và dữ liệu giá lịch sử để dự đoán xu hướng UP/DOWN với reasoning chi tiết.
-
-\begin{lstlisting}[language=Python, caption=Trend Prediction Algorithm (ai-service/main.py)]
-def predict_trend(self, pair_id, time_horizon='24h'):
-    """
-    Du doan xu huong gia dua tren phan tich tin tuc va gia lich su
-    Returns: prediction (up/down/neutral), confidence, reasoning
-    """
-    # Get recent news sentiment (trong 24h)
-    hours = int(time_horizon.replace('h', ''))
-    time_threshold = datetime.now() - timedelta(hours=hours)
-    
-    cur.execute("""
-        SELECT sentiment_score, sentiment_label, COUNT(*) as count
-        FROM news n
-        JOIN news_price_alignment npa ON n.id = npa.news_id
-        WHERE npa.pair_id = %s AND n.published_at >= %s
-        GROUP BY sentiment_score, sentiment_label
-    """, (pair_id, time_threshold))
-    
-    sentiment_data = cur.fetchall()
-    
-    # Get recent price trend (100 data points)
-    cur.execute("""
-        SELECT price, timestamp FROM price_history
-        WHERE pair_id = %s ORDER BY timestamp DESC LIMIT 100
-    """, (pair_id,))
-    price_data = cur.fetchall()
-    
-    # Calculate averages
-    prices = [float(row[0]) for row in price_data]
-    price_change = ((prices[0] - prices[-1]) / prices[-1]) * 100
-    avg_sentiment = sum(score * count for score, _, count in sentiment_data) \
-                    / sum(count for _, _, count in sentiment_data)
-    
-    # Make prediction with confidence
-    if avg_sentiment > 0.1 and price_change > 0:
-        prediction = 'up'
-        confidence = min(0.5 + abs(avg_sentiment) * 0.3, 0.9)
-    elif avg_sentiment < -0.1 and price_change < 0:
-        prediction = 'down'
-        confidence = min(0.5 + abs(avg_sentiment) * 0.3, 0.9)
-    
-    # Build reasoning explanation
-    reasoning = f"Avg sentiment: {avg_sentiment:.3f}, " \
-                f"Price change: {price_change:.2f}%, News: {count} items"
-    
-    return {
-        'prediction': prediction,
-        'confidence': round(confidence, 4),
-        'reasoning': reasoning,
-        'sentiment_score': avg_sentiment,
-        'price_change_percent': price_change
-    }
-\end{lstlisting}
-
-\subsubsection*{Thuật toán Prediction}
-
-\begin{table}[H]
-\centering
-\caption{Decision Matrix cho Trend Prediction}
-\begin{tabular}{|c|c|c|c|}
-\hline
-\textbf{Avg Sentiment} & \textbf{Price Change} & \textbf{Prediction} & \textbf{Confidence} \\
-\hline
-$> 0.1$ & $> 0\%$ & UP & $0.5 + |sentiment| \times 0.3$ \\
-\hline
-$< -0.1$ & $< 0\%$ & DOWN & $0.5 + |sentiment| \times 0.3$ \\
-\hline
-$> 0.2$ & any & UP & $0.4 + |sentiment| \times 0.3$ \\
-\hline
-$< -0.2$ & any & DOWN & $0.4 + |sentiment| \times 0.3$ \\
-\hline
-else & any & NEUTRAL & $0.5$ \\
-\hline
-\end{tabular}
-\end{table}
-
-\textbf{Công thức Confidence Score}:
-$$confidence = \min(base + |avg\_sentiment| \times 0.3, \, 0.9)$$
-
-Với $base = 0.5$ khi sentiment và price cùng hướng, $base = 0.4$ khi chỉ dựa vào sentiment.
-
-\subsubsection*{Ví dụ Response API}
-
-\begin{lstlisting}[language=json, caption=API Response từ /api/predict endpoint]
-{
-  "prediction": "up",
-  "confidence": 0.7523,
-  "reasoning": "Avg sentiment: 0.342, Price change: 2.15%, News: 15 items",
-  "sentiment_score": 0.342,
-  "price_change_percent": 2.15,
-  "time_horizon": "24h"
-}
-\end{lstlisting}
+\textbf{Lưu ý:} Chi tiết về AI Prediction Pipeline với XGBoost và SHAP Explainable AI được trình bày trong chương riêng "AI PREDICTION VỚI EXPLAINABLE AI (XAI)".
 
 \subsection{So sánh Rule-based vs AI-based Parser}
 

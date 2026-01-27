@@ -1,0 +1,469 @@
+% =============================================================================
+% CHAPTER: SCALING ARCHITECTURE - QUÁ TRÌNH SCALE-UP HỆ THỐNG
+% =============================================================================
+
+\chapter{Quá trình Scale-up Kiến trúc Hệ thống}
+
+\section{Tổng quan về Scaling}
+
+Trong quá trình phát triển hệ thống Crypto Analytics Platform, kiến trúc được thiết kế theo nguyên tắc \textbf{progressive scaling} - bắt đầu từ đơn giản và mở rộng dần theo nhu cầu thực tế. Chương này trình bày 5 phiên bản kiến trúc tương ứng với các giai đoạn phát triển khác nhau.
+
+\begin{table}[H]
+\centering
+\caption{Tổng quan các phiên bản kiến trúc}
+\begin{tabular}{|c|l|c|l|}
+\hline
+\textbf{Version} & \textbf{Tên gọi} & \textbf{Users} & \textbf{Đặc điểm chính} \\
+\hline
+V1 & Single Box Monolith & 10-100 & Tất cả trong 1 server \\
+\hline
+V2 & Users+ & 100-1,000 & Tách Database + Object Storage \\
+\hline
+V3 & Users++ & 1,000-10,000 & Load Balancer + Scale ngang \\
+\hline
+V4 & Users+++ & 10,000-100,000 & Microservices + API Gateway \\
+\hline
+V5 & Users++++ & 100,000-1M+ & Autoscaling + Data Lake \\
+\hline
+\end{tabular}
+\end{table}
+
+% =============================================================================
+\section{Version 1: Single Box Monolith}
+% =============================================================================
+
+\subsection{Bối cảnh và Giả định}
+
+\begin{itemize}
+    \item \textbf{Số lượng user}: Vài chục đến vài trăm người dùng
+    \item \textbf{Mục tiêu}: Chạy demo ổn định, chưa cần high availability
+    \item \textbf{Độ trễ}: Chấp nhận được ở mức cơ bản
+    \item \textbf{Phù hợp}: Giai đoạn phát triển đồ án, MVP, Proof of Concept
+\end{itemize}
+
+\subsection{Thành phần Kiến trúc}
+
+Toàn bộ hệ thống chạy trên \textbf{1 EC2 instance} (hoặc 1 VPS) duy nhất trong VPC:
+
+\subsubsection{Web Server + Ứng dụng Monolith}
+
+\begin{itemize}
+    \item \textbf{REST API + WebSocket Server}:
+    \begin{itemize}
+        \item Lấy giá từ Binance API (REST) để build lịch sử
+        \item Mở WebSocket đến Binance để nhận giá realtime và forward ra cho client
+    \end{itemize}
+    
+    \item \textbf{Crawler tin tức}:
+    \begin{itemize}
+        \item Cron job/Background task (Celery/RQ hoặc đơn giản là cron + script)
+        \item Gọi HTTP đến nhiều trang báo, parse HTML
+        \item Trích xuất: Tiêu đề, timestamp, nguồn, link, nội dung, sentiment
+        \item Lưu raw HTML + thông tin đã trích xuất
+    \end{itemize}
+    
+    \item \textbf{Service AI}:
+    \begin{itemize}
+        \item Gọi model AI từ local (file .pt, .h5) hoặc API ngoài
+        \item Align tin tức với giá lịch sử để tạo feature
+    \end{itemize}
+    
+    \item \textbf{Module Account}:
+    \begin{itemize}
+        \item Đăng ký/Đăng nhập
+        \item Profile user, watchlist cặp tiền
+        \item Lưu config GUI (layout chart, khung thời gian yêu thích)
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Database và Storage}
+
+\begin{itemize}
+    \item \textbf{PostgreSQL/MySQL} cài trên cùng máy:
+    \begin{itemize}
+        \item Bảng: users, news, prices, signals, logs
+    \end{itemize}
+    \item \textbf{Local Disk Storage}:
+    \begin{itemize}
+        \item Raw HTML, file model AI, logs
+    \end{itemize}
+\end{itemize}
+
+\subsection{Phân tích Trade-offs}
+
+\begin{table}[H]
+\centering
+\caption{Trade-offs Version 1}
+\begin{tabular}{|p{6cm}|p{6cm}|}
+\hline
+\textbf{Ưu điểm} & \textbf{Nhược điểm} \\
+\hline
+Đơn giản, dễ code, dễ deploy & Không scale ngang được \\
+\hline
+Chi phí thấp (1 server) & Single point of failure \\
+\hline
+Debug nhanh, ít network hop & Tất cả modules cạnh tranh tài nguyên \\
+\hline
+Phù hợp giai đoạn đồ án đầu & Chỉ scale dọc (CPU/RAM/disk) \\
+\hline
+\end{tabular}
+\end{table}
+
+% =============================================================================
+\section{Version 2: Users+ - Tách Database + Object Storage}
+% =============================================================================
+
+\subsection{Trigger để Scale}
+
+Khi số lượng user tăng (vài ngàn), crawler lấy tin từ nhiều nguồn hơn, dữ liệu tin tức và giá lịch sử tăng rất nhanh, cần tách database và storage ra khỏi application server.
+
+\subsection{Thay đổi Kiến trúc}
+
+\begin{itemize}
+    \item \textbf{EC2 App Server}: Chạy monolith như cũ, nhưng bỏ DB ra ngoài
+    \begin{itemize}
+        \item Web + API + WebSocket + Crawler + AI (vẫn là 1 codebase)
+    \end{itemize}
+    
+    \item \textbf{RDS (Managed Database)}:
+    \begin{itemize}
+        \item Tách DB ra thành máy riêng (managed service)
+        \item Bảng tin tức, giá, user, signals
+        \item Có thể scale riêng (tăng RAM, IOPS)
+    \end{itemize}
+    
+    \item \textbf{S3 (Object Storage)}:
+    \begin{itemize}
+        \item Raw HTML của news (để re-parse khi site đổi HTML)
+        \item File model AI
+        \item Log lớn, file backup
+    \end{itemize}
+    
+    \item \textbf{VPC Configuration}:
+    \begin{itemize}
+        \item App server ở public subnet
+        \item RDS + S3 access ở private (qua endpoint, security group)
+    \end{itemize}
+    
+    \item \textbf{Security}:
+    \begin{itemize}
+        \item Security group chỉ cho App server connect đến RDS
+        \item Port mở ra internet: 80/443
+    \end{itemize}
+\end{itemize}
+
+\subsection{Lợi ích của Version 2}
+
+\begin{itemize}
+    \item DB có thể scale riêng (tăng RAM, IOPS)
+    \item S3 xử lý tốt khối lượng lớn file tin tức \& raw HTML (1 TB/tháng là bình thường)
+    \item Ứng dụng nhẹ hơn, không lo full disk vì news/history
+    \item \textbf{Hạn chế}: Vẫn chỉ có 1 app server → dễ nghẽn khi WebSocket connection nhiều
+\end{itemize}
+
+% =============================================================================
+\section{Version 3: Users++ - Load Balancer + Scale ngang}
+% =============================================================================
+
+\subsection{Trigger để Scale}
+
+\begin{itemize}
+    \item Hàng chục nghìn user
+    \item Biểu đồ realtime cho nhiều cặp tiền, đa khung thời gian
+    \item Crawler tin từ nhiều site, AI phân tích nặng hơn
+\end{itemize}
+
+\subsection{Thay đổi Kiến trúc}
+
+\subsubsection{Application Load Balancer (ALB)}
+\begin{itemize}
+    \item Nhận HTTP/HTTPS + WebSocket từ client
+    \item Phân phối request đến nhiều App server
+    \item Pattern: "Horizontal scaling web servers" trong Scaling AWS
+\end{itemize}
+
+\subsubsection{App Server Auto Scaling Group}
+Nhiều EC2 instance chạy:
+\begin{itemize}
+    \item API cho GUI (lấy news đã xử lý, giá, signal)
+    \item WebSocket để push giá realtime \& tín hiệu AI
+    \item Render chart (TradingView-like)
+    \item \textbf{Không} chạy crawler \& jobs nặng AI (để tránh block)
+\end{itemize}
+
+\subsubsection{Worker Cluster (Crawler + AI)}
+Một Auto Scaling Group khác với role "Worker":
+\begin{itemize}
+    \item \textbf{Crawler Service}:
+    \begin{itemize}
+        \item Gửi HTTP đến các site news
+        \item Rule-based theo CSS selector/XPath cho từng site
+        \item ML model phân loại block (title, body, author)
+        \item Đẩy kết quả vào DB + lưu raw HTML lên S3
+    \end{itemize}
+    \item \textbf{AI Service}:
+    \begin{itemize}
+        \item Consumes news + price history
+        \item Gọi model AI để tạo sentiment, dự đoán xu hướng
+        \item Lưu signals vào DB
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Message Queue (SQS/Kafka)}
+\begin{itemize}
+    \item \textbf{News Fetch Queue}: app tạo job khi cần crawl nguồn mới
+    \item \textbf{AI Analysis Queue}: crawler xong → đẩy job để AI xử lý
+    \item Pattern: "Queues + Workers" trong Asynchronism
+\end{itemize}
+
+\subsubsection{RDS với Read Replicas}
+\begin{itemize}
+    \item Master: ghi
+    \item 1-2 read replica: phục vụ query đọc nặng (news list, history chart)
+\end{itemize}
+
+\subsubsection{Cache Layer (Redis/ElastiCache)}
+Cache-aside pattern cho:
+\begin{itemize}
+    \item Giá hiện tại của BTCUSDT, ETHUSDT, ...
+    \item Top news mới nhất
+    \item Tín hiệu AI nóng
+\end{itemize}
+
+\subsection{Lý do cần Version 3}
+
+\begin{itemize}
+    \item Nhu cầu người dùng tăng: xem đa cặp tiền, đa khung thời gian, realtime
+    \item Hàng ngàn WebSocket connection → cần nhiều app server
+    \item Công việc nặng (crawler, AI) tách ra để không làm web bị lag
+    \item Queue + Worker giúp xử lý bất đồng bộ, có khả năng backpressure
+    \item ALB + nhiều instance + read replica DB → high availability
+\end{itemize}
+
+% =============================================================================
+\section{Version 4: Users+++ - Microservices + API Gateway}
+% =============================================================================
+
+\subsection{Trigger để Scale}
+
+\begin{itemize}
+    \item Lên tới trăm nghìn user
+    \item Yêu cầu tính modular để đội dev chia nhau làm
+    \item Cần tăng độ tin cậy từng module và scale độc lập
+\end{itemize}
+
+\subsection{Kiến trúc Microservices}
+
+\subsubsection{API Gateway (Nginx/Kong/Envoy)}
+Entry point duy nhất cho client:
+\begin{itemize}
+    \item \texttt{/news/*} → News Service
+    \item \texttt{/prices/*} → Market Data Service
+    \item \texttt{/ai/*} → AI Service
+    \item \texttt{/account/*} → Account Service
+\end{itemize}
+
+Thực hiện:
+\begin{itemize}
+    \item AuthN/AuthZ (JWT, OAuth)
+    \item Rate limiting, request logging
+\end{itemize}
+
+\subsubsection{Market Data Service}
+\begin{itemize}
+    \item Kết nối WebSocket đến Binance, duy trì stream giá realtime
+    \item Lưu giá lịch sử vào Time-series DB hoặc RDS riêng
+    \item Expose:
+    \begin{itemize}
+        \item REST: lịch sử giá, multi-timeframe (1m, 5m, 1h, 1d)
+        \item WebSocket/SSE: giá hiện tại \& candlestick realtime
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{News Service}
+\begin{itemize}
+    \item Quản lý crawler worker
+    \item Lưu, index tin tức trong DB riêng
+    \item Elasticsearch/OpenSearch để search nhanh
+\end{itemize}
+
+\subsubsection{AI Service}
+\begin{itemize}
+    \item Nhận tin tức đã align với giá
+    \item Trả về: Sentiment score, Prediction (UP/DOWN), Explanation
+    \item Wrap model hộp đen (HuggingFace, SageMaker endpoint)
+\end{itemize}
+
+\subsubsection{Account Service}
+\begin{itemize}
+    \item User, auth, profile, watchlist, setting GUI
+    \item Token-based auth (JWT) để các service khác verify
+\end{itemize}
+
+\subsubsection{Message Bus (Kafka/Kinesis)}
+Topics:
+\begin{itemize}
+    \item \texttt{news\_raw}: Raw news data từ crawler
+    \item \texttt{news\_parsed}: Parsed news sau processing
+    \item \texttt{price\_ticks}: Real-time price updates
+    \item \texttt{ai\_signals}: AI prediction signals
+\end{itemize}
+
+\subsection{Lý do chuyển sang Microservices}
+
+\begin{table}[H]
+\centering
+\caption{Lợi ích của Microservices Architecture}
+\begin{tabular}{|l|p{8cm}|}
+\hline
+\textbf{Khía cạnh} & \textbf{Lợi ích} \\
+\hline
+Domain rõ ràng & 4 phần tách biệt (news, price, AI, account) phù hợp chia service \\
+\hline
+Scale độc lập & Market Data cần CPU/network, AI cần GPU, News cần IO \\
+\hline
+Độ tin cậy & AI Service lỗi, chart + news vẫn chạy (graceful degradation) \\
+\hline
+Team phát triển & Mỗi team phụ trách 1 service, độc lập deploy \\
+\hline
+\end{tabular}
+\end{table}
+
+% =============================================================================
+\section{Version 5: Users++++ - Autoscaling + Data Lake}
+% =============================================================================
+
+\subsection{Trigger để Scale}
+
+\begin{itemize}
+    \item Hàng triệu user
+    \item Khối lượng tin tức \& giá rất lớn (1B writes/tháng, 100B reads/tháng)
+    \item Yêu cầu AI nâng cao với causal inference
+\end{itemize}
+
+\subsection{Thành phần Bổ sung}
+
+\subsubsection{Autoscaling cho từng nhóm}
+Auto Scaling Group cho:
+\begin{itemize}
+    \item Market Data Service
+    \item News Service
+    \item AI Service
+    \item Account/GUI Service
+\end{itemize}
+
+Scale metrics:
+\begin{itemize}
+    \item CPU utilization
+    \item Number of connections
+    \item Message queue lag
+    \item Custom business metrics
+\end{itemize}
+
+\subsubsection{Global CDN}
+\begin{itemize}
+    \item Frontend static (JS/CSS, bundle TradingView-like) qua CloudFront
+    \item Giảm tải App server, giảm latency cho user toàn cầu
+\end{itemize}
+
+\subsubsection{Data Warehouse / Data Lake}
+Đổ news + price + signals về:
+\begin{itemize}
+    \item Redshift / BigQuery / Snowflake hoặc S3-based data lake
+    \item Training model mới
+    \item Phân tích offline (backtest, AB test chiến lược)
+\end{itemize}
+
+\subsubsection{Feature Store cho AI}
+\begin{itemize}
+    \item Lưu các feature đã xử lý (sentiment series, lag features, volume, volatility)
+    \item Giúp inference nhanh, training reproducible
+\end{itemize}
+
+\subsubsection{Observability / Monitoring}
+\begin{itemize}
+    \item \textbf{Metrics}: Latency API, error rate, throughput, queue lag, DB load
+    \item \textbf{Logs}: Centralized log (ELK, CloudWatch Logs, Splunk)
+    \item \textbf{Alerts}: PagerDuty/Email khi lỗi 5xx tăng, latency tăng, AI timeout
+\end{itemize}
+
+\subsection{Lý do cần Version 5}
+
+\begin{itemize}
+    \item \textbf{Scale chi tiết theo từng tải}:
+    \begin{itemize}
+        \item Giờ cao điểm (US business hours) giá/WS load tăng → autoscale Market Data
+        \item Major news (SEC, ETF, regulation) → autoscale News + AI Worker
+    \end{itemize}
+    \item \textbf{High Availability}:
+    \begin{itemize}
+        \item Multiple AZs, autoscaling, health check
+        \item Rollback, canary deployment
+    \end{itemize}
+    \item \textbf{AI nâng cao}:
+    \begin{itemize}
+        \item Cần nhiều dữ liệu lịch sử để làm causal inference
+        \item Data lake \& warehouse phục vụ training model
+    \end{itemize}
+\end{itemize}
+
+% =============================================================================
+\section{So sánh Tổng quan các Phiên bản}
+% =============================================================================
+
+\begin{table}[H]
+\centering
+\caption{So sánh chi tiết các phiên bản kiến trúc}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{|l|c|c|c|c|c|}
+\hline
+\textbf{Đặc điểm} & \textbf{V1} & \textbf{V2} & \textbf{V3} & \textbf{V4} & \textbf{V5} \\
+\hline
+Số lượng user & 10-100 & 100-1K & 1K-10K & 10K-100K & 100K-1M+ \\
+\hline
+App Servers & 1 & 1 & N (ASG) & N per service & N per service \\
+\hline
+Database & Local & RDS & RDS + Replicas & Per-service DB & Multi-AZ + Lake \\
+\hline
+Load Balancer & None & None & ALB & API Gateway & API Gateway \\
+\hline
+Message Queue & None & None & SQS/Kafka & Kafka & Kafka Cluster \\
+\hline
+Cache & None & None & Redis & Redis & Redis Cluster \\
+\hline
+Storage & Local & S3 & S3 & S3 & S3 + Data Lake \\
+\hline
+Monitoring & Basic & Basic & CloudWatch & Prometheus & Full Stack \\
+\hline
+Availability & Low & Medium & High & High & Very High \\
+\hline
+Complexity & Low & Low & Medium & High & Very High \\
+\hline
+Cost & \$ & \$\$ & \$\$\$ & \$\$\$\$ & \$\$\$\$\$ \\
+\hline
+\end{tabular}
+}
+\end{table}
+
+% =============================================================================
+\section{Kết luận}
+% =============================================================================
+
+Quá trình scale-up kiến trúc của Crypto Analytics Platform tuân theo nguyên tắc:
+
+\begin{enumerate}
+    \item \textbf{Start Simple}: Bắt đầu với monolith đơn giản, tập trung vào business logic
+    \item \textbf{Measure First}: Đo đạc bottleneck trước khi tối ưu
+    \item \textbf{Scale Incrementally}: Tách từng phần khi cần thiết, không over-engineer
+    \item \textbf{Embrace Trade-offs}: Mỗi quyết định kiến trúc đều có trade-off về complexity vs scalability
+\end{enumerate}
+
+Dự án hiện tại đang ở \textbf{Version 4} với kiến trúc microservices, sử dụng:
+\begin{itemize}
+    \item 4 services: Auth, Market, Crawler, AI
+    \item Kafka message broker
+    \item PostgreSQL + Redis
+    \item Docker Compose cho orchestration
+\end{itemize}
+
+Kiến trúc này phù hợp với quy mô đồ án và có thể dễ dàng mở rộng lên Version 5 khi cần thiết.
