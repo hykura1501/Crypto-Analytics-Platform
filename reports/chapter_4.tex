@@ -18,39 +18,44 @@
 \node[box, fill=green!30] (fe) {Frontend\\React + Vite};
 
 % API Layer
-\node[box, fill=orange!30, below=1.5cm of fe] (api) {Backend API\\Golang + Gin};
-\node[box, fill=orange!20, right=0.5cm of api] (ws) {WebSocket Hub};
+\node[box, fill=orange!30, below left=1.5cm and 1cm of fe] (auth) {Auth Service\\Golang};
+\node[box, fill=orange!30, below=1.5cm of fe] (market) {Market Service\\Golang + WS};
+\node[box, fill=purple!30, below right=1.5cm and 1cm of fe] (crawler) {Crawler Service\\Golang};
 
-% Business Layer
-\node[box, fill=purple!30, below left=1.5cm and 0.5cm of api] (crawler) {Crawler\\Python};
-\node[box, fill=red!30, below right=1.5cm and 0.5cm of api] (ai) {AI Service\\Flask};
+% AI Service
+\node[box, fill=red!30, below=3cm of fe] (ai) {AI Service\\Python + FinBERT};
+
+% Message Broker
+\node[box, fill=yellow!30, below left=1.5cm and 0cm of ai] (kafka) {Kafka\\Message Broker};
 
 % Data Layer
-\node[box, fill=gray!30, below=3cm of api] (pg) {PostgreSQL};
-\node[box, fill=pink!30, right=1.5cm of pg] (redis) {Redis};
+\node[box, fill=gray!30, below=1.5cm of ai] (pg) {PostgreSQL};
 
 % External
-\node[box, fill=yellow!30, right=2.5cm of ws] (binance) {Binance API};
-\node[box, fill=cyan!30, left=2.5cm of crawler] (news) {News Sources};
+\node[box, fill=cyan!30, right=3cm of market] (binance) {Binance API\\WebSocket};
+\node[box, fill=cyan!30, right=3cm of crawler] (news) {RSS Feeds\\News Sources};
 
 % Arrows
-\draw[<->] (fe) -- (api);
-\draw[<->] (fe) -- (ws);
-\draw[->] (api) -- (pg);
-\draw[<->] (api) -- (redis);
-\draw[->] (ws) -- (binance);
+\draw[<->] (fe) -- (auth);
+\draw[<->] (fe) -- (market);
+\draw[->] (fe) -- (crawler);
+\draw[->] (market) -- (binance);
 \draw[->] (crawler) -- (news);
+\draw[->] (crawler) -- (kafka);
+\draw[->] (market) -- (kafka);
+\draw[<-] (ai) -- (kafka);
+\draw[->] (auth) -- (pg);
+\draw[->] (market) -- (pg);
 \draw[->] (crawler) -- (pg);
 \draw[->] (ai) -- (pg);
-\draw[<->] (api) -- (ai);
 
 \end{tikzpicture}
-\caption{Kiến trúc tổng quan Crypto Analytics Platform}
+\caption{Kiến trúc Microservices Crypto Analytics Platform}
 \end{figure}
 
 \subsection{Database Schema}
 
-\begin{lstlisting}[language=SQL, caption=Database Schema chính]
+\begin{lstlisting}[language=SQL, caption=Main Database Schema]
 -- Trading Pairs
 CREATE TABLE trading_pairs (
     id SERIAL PRIMARY KEY,
@@ -153,7 +158,7 @@ CREATE TABLE watchlists (
 
 \subsection{Docker Compose Configuration}
 
-\begin{lstlisting}[language=yaml, caption=docker-compose.yml]
+\begin{lstlisting}[language=yaml, caption=docker-compose.yml with Kafka]
 version: '3.8'
 
 services:
@@ -168,121 +173,133 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crypto_user -d cryptodb"]
       interval: 10s
-      timeout: 5s
-      retries: 5
 
-  backend:
-    build: ./backend
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
     ports:
-      - "8080:8080"
+      - "9092:9092"
+
+  auth-service:
+    build: ./services/auth-service
+    ports:
+      - "8081:8081"
     environment:
       DATABASE_URL: postgres://crypto_user:crypto_pass@postgres:5432/cryptodb
-      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-secret-key
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
 
-  redis:
-    image: redis:7-alpine
+  market-service:
+    build: ./services/market-service
     ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  crawler:
-    build: ./services/crawler
+      - "8082:8082"
     environment:
       DATABASE_URL: postgres://crypto_user:crypto_pass@postgres:5432/cryptodb
+      KAFKA_BROKER: kafka:9092
+      BINANCE_WS_URL: wss://stream.binance.com:9443
     depends_on:
-      postgres:
-        condition: service_healthy
-      backend:
-        condition: service_started
-    restart: unless-stopped
+      - postgres
+      - kafka
+
+  crawler-service:
+    build: ./services/crawler-service
+    ports:
+      - "8083:8083"
+    environment:
+      DATABASE_URL: postgres://crypto_user:crypto_pass@postgres:5432/cryptodb
+      KAFKA_BROKER: kafka:9092
+    depends_on:
+      - postgres
+      - kafka
 
   ai-service:
-    build: ./services/ai-service
+    build: ./services/ai-service-python
     ports:
       - "5000:5000"
     environment:
       DATABASE_URL: postgres://crypto_user:crypto_pass@postgres:5432/cryptodb
+      KAFKA_BROKER: kafka:9092
+      GEMINI_API_KEY: your-gemini-key
     depends_on:
-      postgres:
-        condition: service_healthy
-      backend:
-        condition: service_started
-    restart: unless-stopped
+      - postgres
+      - kafka
 \end{lstlisting}
 
 \subsection{Trading Chart Component - Hiển thị biểu đồ giá}
 
 Hệ thống sử dụng thư viện \textbf{Lightweight Charts} của TradingView để hiển thị biểu đồ nến (candlestick) với khả năng cập nhật realtime qua WebSocket.
 
-\begin{lstlisting}[language=JavaScript, caption=TradingChart.tsx - Component hiển thị biểu đồ]
-import { createChart, IChartApi, ISeriesApi, 
-         CandlestickData, Time } from 'lightweight-charts'
-import { useWebSocket } from '../hooks/useWebSocket'
-import { getKlines } from '../services/api'
+\begin{lstlisting}[language=TypeScript, caption=Chart.tsx - Trading Chart Component (frontend/src/components/Chart.tsx)]
+import { createChart, CandlestickSeries, CrosshairMode } from 'lightweight-charts';
+import { useWebSocket } from '../contexts/WebSocketContext';
+import { apiClient } from '../api/client';
 
-export default function TradingChart({ pair, interval = '1h' }) {
-  const chartContainerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<IChartApi | null>(null)
-  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
-
-  // WebSocket connection for realtime price updates
-  const wsData = useWebSocket(`/ws/price/${pair}`)
+export default function Chart({ symbol = 'BTCUSDT', interval = '1h' }) {
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  
+  const { subscribe, unsubscribe, lastMessage, getLastMessage, isConnected } =
+    useWebSocket();
+  
+  // Derive current topic message
+  const currentTopicMessage = useMemo(() => {
+    const topic = `market:${symbol}:${interval}`;
+    return getLastMessage(topic);
+  }, [symbol, interval, lastMessage, getLastMessage]);
 
   useEffect(() => {
-    // Create chart with dark theme
+    // Create chart with professional styling
     const chart = createChart(chartContainerRef.current, {
       layout: {
-        background: { color: '#0a0e27' },
-        textColor: '#d1d5db',
+        background: { color: '#ffffff' },
+        textColor: '#333',
       },
-      grid: {
-        vertLines: { color: '#1f2937' },
-        horzLines: { color: '#1f2937' },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: '#9B7DFF', style: 3 },
+        horzLine: { color: '#9B7DFF', style: 3 },
       },
-    })
+      timeScale: { timeVisible: true, secondsVisible: false },
+    });
 
-    // Add candlestick series with up/down colors
-    const candlestickSeries = chart.addCandlestickSeries({
-      upColor: '#26a69a',    // Green for price up
-      downColor: '#ef5350',  // Red for price down
+    // Add candlestick series
+    const candlestickSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#26a69a',
+      downColor: '#ef5350',
       wickUpColor: '#26a69a',
       wickDownColor: '#ef5350',
-    })
+    });
+    
+    candlestickSeriesRef.current = candlestickSeries;
+    loadHistoricalData(symbol, interval);
+    
+    return () => chart.remove();
+  }, [symbol, interval]);
 
-    candlestickSeriesRef.current = candlestickSeries
-    loadHistoricalData(pair, interval)  // Load Klines from Binance
-    return () => chart.remove()
-  }, [pair, interval])
-
-  // Update chart when WebSocket receives new price
-  useEffect(() => {
-    if (wsData && candlestickSeriesRef.current) {
-      const price = wsData.price
-      if (price) setCurrentPrice(parseFloat(price))
-    }
-  }, [wsData])
-
-  // Load historical OHLC data from Binance API
-  const loadHistoricalData = async (symbol, inter) => {
-    const klines = await getKlines(symbol, inter, 500)
-    const formattedData = klines.map((kline) => ({
-      time: (kline[0] / 1000) as Time,  // Unix timestamp
-      open: parseFloat(kline[1]),
-      high: parseFloat(kline[2]),
-      low: parseFloat(kline[3]),
-      close: parseFloat(kline[4]),
-    }))
-    candlestickSeriesRef.current?.setData(formattedData)
-  }
+  const loadHistoricalData = async (sym: string, inter: string) => {
+    const response = await apiClient.getHistory({ symbol: sym, interval: inter });
+    const formattedData = response.data.map((price) => ({
+      time: (new Date(price.time).getTime() / 1000) as Time,
+      open: price.open,
+      high: price.high,
+      low: price.low,
+      close: price.close,
+    }));
+    candlestickSeriesRef.current?.setData(formattedData);
+  };
 }
 \end{lstlisting}
 
@@ -318,7 +335,7 @@ export default function TradingChart({ pair, interval = '1h' }) {
 
 Hệ thống phân biệt 2 loại tài khoản: \textbf{Free (thường)} và \textbf{VIP (Premium)} với các quyền truy cập khác nhau.
 
-\begin{lstlisting}[language=SQL, caption=User Schema với phân quyền]
+\begin{lstlisting}[language=SQL, caption=User Schema with Role-based Access]
 -- Users với account type
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
@@ -367,8 +384,8 @@ Xem lịch sử phân tích & $\times$ & \checkmark & Tra cứu các phân tích
 \end{tabular}
 \end{table}
 
-\begin{lstlisting}[language=Go, caption=Middleware kiểm tra quyền VIP]
-// VIPRequired middleware kiểm tra user có quyền VIP
+\begin{lstlisting}[language=Go, caption=VIP Authorization Middleware]
+// VIPRequired middleware checks if user has VIP access
 func (h *Handler) VIPRequired() gin.HandlerFunc {
     return func(c *gin.Context) {
         userID := c.GetInt("user_id")
@@ -386,7 +403,7 @@ func (h *Handler) VIPRequired() gin.HandlerFunc {
             return
         }
         
-        // Kiểm tra account_type và expiration
+        // Check account_type and expiration
         if accountType != "vip" {
             c.JSON(http.StatusForbidden, gin.H{
                 "error": "VIP subscription required",
@@ -396,7 +413,7 @@ func (h *Handler) VIPRequired() gin.HandlerFunc {
             return
         }
         
-        // Kiểm tra VIP còn hiệu lực
+        // Check if VIP is still valid
         if vipExpiresAt.Valid && vipExpiresAt.Time.Before(time.Now()) {
             c.JSON(http.StatusForbidden, gin.H{
                 "error": "VIP subscription expired",

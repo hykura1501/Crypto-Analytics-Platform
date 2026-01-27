@@ -71,11 +71,17 @@ Sinh viên cần:
 \subsubsection*{3. Phân tích AI và Sentiment Analysis}
 \begin{itemize}
     \item \textbf{Align tin tức với giá}: kết hợp tin tức và giá lịch sử để phân tích
-    \item \textbf{Mô hình AI}: sử dụng VADER, TextBlob cho sentiment analysis
-    \item \textbf{Phân tích nhân quả (Causal Analysis)}:
+    \item \textbf{Mô hình AI} (hộp đen - pre-trained):
+    \begin{itemize}
+        \item FinBERT: Sentiment analysis cho tiếng Anh (financial domain)
+        \item PhoBERT: Sentiment analysis cho tiếng Việt
+        \item XGBoost: Prediction model kết hợp technical indicators và news sentiment
+    \end{itemize}
+    \item \textbf{Phân tích nhân quả (Causal Analysis) - Explainable AI}:
     \begin{itemize}
         \item Dự đoán xu hướng giờ/ngày tiếp theo: UP/DOWN
-        \item Đưa ra lý do tại sao (reasoning based on news sentiment)
+        \item SHAP (SHapley Additive exPlanations) để giải thích tại sao
+        \item Hiển thị top news articles có ảnh hưởng nhất với keywords
         \item Độ tin cậy (confidence score) cho mỗi prediction
     \end{itemize}
 \end{itemize}
@@ -106,13 +112,13 @@ Sinh viên cần:
 \hline
 \textbf{Yêu cầu chức năng} & \textbf{Tình huống kỹ thuật} & \textbf{Giải pháp} \\
 \hline
-Hiển thị biểu đồ realtime cho 1000+ users & Tình huống 1: Scale WebSocket & Hub pattern, Redis Pub/Sub, Auto-reconnect \\
+Hiển thị biểu đồ realtime cho 1000+ users & Tình huống 1: Scale WebSocket & Hub pattern, Topic-based subscription, Kafka \\
 \hline
-Thu thập tin tức từ nhiều nguồn & Tình huống 2: Crawler tự động & Adaptive selectors, AI parsing, Exponential backoff \\
+Thu thập tin tức từ nhiều nguồn & Tình huống 2: Crawler tự động & Golang Crawler, Gemini AI CSS selector, Kafka async \\
 \hline
-Quản lý tài khoản thường/VIP & Tình huống 3: Bảo mật & OAuth2 + JWT, Token blacklist, RBAC \\
+Phân tích AI với XAI & Chương AI Prediction & XGBoost + SHAP, FinBERT/PhoBERT, Feature explanation \\
 \hline
-Phân tích sentiment và dự đoán & AI Service & VADER + TextBlob, News-Price alignment \\
+Quản lý tài khoản thường/VIP & Tình huống 3: Bảo mật & JWT + Refresh Token, Role-based middleware \\
 \hline
 \end{tabular}
 \end{table}
@@ -130,78 +136,98 @@ Frontend & React + TypeScript + Vite & Giao diện người dùng, Trading Chart
 \hline
 Trading Chart & Lightweight Charts & Hiển thị biểu đồ nến (candlestick) \\
 \hline
-Backend API & Golang + Gin Framework & REST API, WebSocket Hub \\
+Auth Service & Golang + Gin + GORM & JWT + Refresh Token, User management \\
 \hline
-Crawler Service & Python + BeautifulSoup & Thu thập tin tức tự động \\
+Market Service & Golang + Gin + WebSocket & Binance integration, WebSocket Hub \\
 \hline
-AI Service & Python + Flask + VADER + TextBlob & Phân tích sentiment, dự đoán \\
+Crawler Service & Golang + Colly + gofeed & RSS parsing, Concurrent crawling \\
+\hline
+AI Service & Python + Flask + XGBoost & Sentiment + Prediction + SHAP \\
+\hline
+Sentiment Models & FinBERT + PhoBERT & Tiếng Anh + Tiếng Việt \\
+\hline
+CSS Selector AI & Google Gemini API & Tự động học cấu trúc HTML \\
+\hline
+Message Broker & Apache Kafka & Async communication giữa services \\
 \hline
 Database & PostgreSQL 15 & Lưu trữ dữ liệu chính \\
 \hline
-Cache & Redis 7 & Caching, session store, token blacklist \\
+Cache & Redis 7 & Caching, token store \\
 \hline
 Container & Docker Compose & Orchestration \\
-\hline
-External API & Binance API (REST + WebSocket) & Dữ liệu giá lịch sử và realtime \\
 \hline
 \end{tabular}
 \end{table}
 
 \subsection*{Kiến trúc tổng quan}
 
-Hệ thống được thiết kế theo kiến trúc microservices với các thành phần chính:
+Hệ thống được thiết kế theo kiến trúc microservices với Kafka message broker:
 
 \begin{enumerate}
-    \item \textbf{Client Layer}: Frontend React với Trading Chart và các pages (Dashboard, Chart, News, Account)
-    \item \textbf{API Gateway Layer}: Backend Golang với REST API và WebSocket Hub
-    \item \textbf{Business Logic Layer}: Crawler Service (thu thập tin tức) và AI Analysis Service (phân tích sentiment)
-    \item \textbf{Data Layer}: PostgreSQL (dữ liệu chính) và Redis (cache, sessions)
-    \item \textbf{External Services}: Binance API (giá) và các nguồn tin tức (CoinTelegraph, CoinDesk)
+    \item \textbf{Client Layer}: Frontend React với Trading Chart và các pages (Dashboard, News, Sources)
+    \item \textbf{Microservices Layer}:
+    \begin{itemize}
+        \item Auth Service: Xác thực, phân quyền (JWT + Refresh Token)
+        \item Market Service: Binance WebSocket, Price data, Client Hub
+        \item Crawler Service: RSS parsing, HTML crawling, Kafka producer
+        \item AI Service: Sentiment analysis, Prediction, SHAP explanation
+    \end{itemize}
+    \item \textbf{Message Broker}: Apache Kafka cho async communication
+    \item \textbf{Data Layer}: PostgreSQL (dữ liệu chính) và Redis (cache)
+    \item \textbf{External Services}: Binance API, RSS feeds, Gemini AI
 \end{enumerate}
 
 \begin{figure}[H]
 \centering
 \begin{tikzpicture}[
     node distance=1cm,
-    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.7cm, align=center, font=\small}
+    box/.style={rectangle, draw, minimum width=2.2cm, minimum height=0.6cm, align=center, font=\scriptsize}
 ]
 
 % User
 \node[box, fill=green!30] (user) {Người dùng\\(Free/VIP)};
 
 % Frontend
-\node[box, fill=green!20, below=1cm of user] (fe) {Frontend\\React + Chart};
+\node[box, fill=green!20, below=0.8cm of user] (fe) {Frontend\\React + Chart};
 
-% Backend
-\node[box, fill=orange!30, below=1cm of fe] (api) {Backend API\\(Golang)};
-\node[box, fill=orange!20, right=0.5cm of api] (ws) {WebSocket\\Hub};
+% Services row
+\node[box, fill=orange!30, below left=1.2cm and 1.5cm of fe] (auth) {Auth Service\\Golang};
+\node[box, fill=orange!20, below=1.2cm of fe] (market) {Market Service\\Golang + WS};
+\node[box, fill=purple!30, below right=1.2cm and 1.5cm of fe] (crawler) {Crawler\\Golang};
 
-% Services
-\node[box, fill=purple!30, below left=1.5cm and 0.5cm of api] (crawler) {Crawler\\Service};
-\node[box, fill=red!30, below right=1.5cm and 0.5cm of api] (ai) {AI Analysis\\Service};
+% Kafka
+\node[box, fill=yellow!30, below=2.5cm of fe] (kafka) {Apache Kafka\\Message Broker};
+
+% AI Service
+\node[box, fill=red!30, below=0.8cm of kafka] (ai) {AI Service\\Python + SHAP};
 
 % Database
-\node[box, fill=gray!30, below=3cm of api] (db) {PostgreSQL};
-\node[box, fill=pink!30, right=1cm of db] (redis) {Redis};
+\node[box, fill=gray!30, below left=1.5cm and 0cm of kafka] (db) {PostgreSQL};
+\node[box, fill=pink!30, left=0.5cm of auth] (redis) {Redis};
 
 % External
-\node[box, fill=yellow!30, right=3cm of ws] (binance) {Binance\\API};
-\node[box, fill=cyan!30, left=3cm of crawler] (news) {News\\Sources};
+\node[box, fill=cyan!30, right=1cm of market] (binance) {Binance\\API};
+\node[box, fill=cyan!30, right=1cm of crawler] (news) {RSS\\Feeds};
+\node[box, fill=yellow!20, right=1cm of ai] (gemini) {Gemini\\AI};
 
 % Arrows
 \draw[->] (user) -- (fe);
-\draw[<->] (fe) -- (api);
-\draw[<->] (fe) -- (ws);
-\draw[->] (api) -- (db);
-\draw[<->] (api) -- (redis);
-\draw[->] (ws) -- (binance);
+\draw[<->] (fe) -- (auth);
+\draw[<->] (fe) -- (market);
+\draw[->] (fe) -- (crawler);
+\draw[->] (market) -- (binance);
 \draw[->] (crawler) -- (news);
+\draw[->, orange] (crawler) -- node[right, font=\tiny] {produce} (kafka);
+\draw[->, orange] (kafka) -- node[right, font=\tiny] {consume} (ai);
+\draw[->] (ai) -- (gemini);
+\draw[->] (auth) -- (db);
+\draw[->] (market) -- (db);
 \draw[->] (crawler) -- (db);
 \draw[->] (ai) -- (db);
-\draw[<->] (api) -- (ai);
+\draw[<->] (auth) -- (redis);
 
 \end{tikzpicture}
-\caption{Kiến trúc tổng quan hệ thống Crypto Analytics Platform}
+\caption{Kiến trúc Microservices Crypto Analytics Platform}
 \end{figure}
 
 \newpage

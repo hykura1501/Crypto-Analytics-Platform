@@ -9,19 +9,53 @@
 \begin{table}[H]
 \centering
 \caption{Yêu cầu chức năng và cách thực hiện trong mã nguồn}
-\begin{tabular}{|p{3cm}|p{4cm}|p{5cm}|}
+\begin{tabular}{|p{3.5cm}|p{4.5cm}|p{5.5cm}|}
 \hline
 \textbf{Yêu cầu} & \textbf{Thành phần} & \textbf{Files liên quan} \\
 \hline
-Thu thập tin tức tài chính & Crawler Service & \texttt{crawler/main.py}, \texttt{news\_sources} table \\
+\multicolumn{3}{|c|}{\textbf{1. Thu thập tin tức tài chính (Crawler)}} \\
 \hline
-Hiển thị biểu đồ giá & Trading Chart & \texttt{TradingChart.tsx}, \texttt{useWebSocket.ts}, \texttt{binance.go} \\
+Crawl từ nhiều nguồn & Crawler Service (Golang) & \texttt{crawler-service/internal/crawler/} \\
 \hline
-Phân tích AI Sentiment & AI Service & \texttt{ai-service/main.py}, VADER + TextBlob \\
+Xác định thông tin cần thiết & RSS Parser + Colly & \texttt{fetcher.go}, \texttt{crawler.go} \\
 \hline
-Dự đoán UP/DOWN & AI Prediction & \texttt{predict\_trend()}, \texttt{ai\_analysis} table \\
+Tự động học cấu trúc HTML & Gemini AI CSS Selector & \texttt{ai-service/gemini/gemini\_client.py} \\
 \hline
-Tài khoản Free/VIP & User Management & \texttt{users} table, VIPRequired middleware \\
+Lưu trữ đầy đủ & PostgreSQL + Kafka & \texttt{db/db.go}, \texttt{kafka/producer.go} \\
+\hline
+\multicolumn{3}{|c|}{\textbf{2. Hiển thị biểu đồ giá (TradingView-like)}} \\
+\hline
+Gọi API giá lịch sử & Market Service + Binance API & \texttt{pkg/binance/client.go} \\
+\hline
+WebSocket realtime & Binance WS + Client Hub & \texttt{pkg/binance/websocket.go}, \texttt{pkg/websocket/hub.go} \\
+\hline
+Đa khung thời gian & Frontend ChartContainer & \texttt{components/ChartContainer.tsx} \\
+\hline
+Đa cặp tiền & Symbol Selector + Topic Subscribe & \texttt{Dashboard.tsx}, topic-based hub \\
+\hline
+Scale nhiều người dùng & Hub Pattern + Kafka & Chapter 1: WebSocket Scale \\
+\hline
+\multicolumn{3}{|c|}{\textbf{3. AI Phân tích tin tức}} \\
+\hline
+Sentiment Analysis & FinBERT + PhoBERT & \texttt{internal/sentiment/sentiment.py} \\
+\hline
+Align tin tức + giá & Time-bucket alignment & \texttt{prediction.py}: \texttt{process\_news()} \\
+\hline
+Dự đoán UP/DOWN & XGBoost Regressor & \texttt{prediction.py}: \texttt{train()}, \texttt{predict()} \\
+\hline
+Phân tích nhân quả (XAI) & SHAP TreeExplainer & \texttt{prediction.py}: SHAP contributions \\
+\hline
+\multicolumn{3}{|c|}{\textbf{4. Quản lý tài khoản (Thường/VIP)}} \\
+\hline
+Authentication & Auth Service (Golang) & \texttt{auth-service/internal/service/} \\
+\hline
+JWT + Refresh Token & Token Management & \texttt{pkg/utils/jwt.go} \\
+\hline
+Phân quyền VIP & Role-based Middleware & Chapter 3: RequireVIP middleware \\
+\hline
+Tài khoản thường & Xem biểu đồ & \texttt{ChartContainer.tsx} \\
+\hline
+Tài khoản VIP & Xem AI Analysis & \texttt{PredictionPanel.tsx} (protected) \\
 \hline
 \end{tabular}
 \end{table}
@@ -31,15 +65,19 @@ Tài khoản Free/VIP & User Management & \texttt{users} table, VIPRequired midd
 \begin{table}[H]
 \centering
 \caption{Tổng kết giải pháp cho các tình huống}
-\begin{tabular}{|p{3cm}|p{4cm}|p{5cm}|}
+\begin{tabular}{|p{3cm}|p{4cm}|p{5.5cm}|}
 \hline
 \textbf{Tình huống} & \textbf{Vấn đề} & \textbf{Giải pháp} \\
 \hline
-1. WebSocket Scale & Load balancing, server failure & Hub pattern, sticky session, Redis Pub/Sub, auto reconnect \\
+1. WebSocket Scale & Load balancing, server failure & Hub pattern, Topic-based subscription, Kafka message queue \\
 \hline
-2. News Crawler & HTML thay đổi, SPA rendering & Adaptive selectors, AI sentiment analysis, exponential backoff \\
+2. News Crawler & HTML thay đổi, RSS parsing & Golang RSS crawler, Gemini AI cho CSS selector, Kafka async processing \\
 \hline
-3. Security & JWT vulnerability, bypass gateway & OAuth2 + JWT, token blacklist, zero-trust, network policies \\
+3. AI Prediction & Black-box AI, không giải thích được & XGBoost + SHAP XAI, Feature contributions, Top news with keywords \\
+\hline
+4. Security \& Auth & JWT vulnerability, phân quyền & OAuth2 + JWT Refresh, Role-based access (Normal/VIP) \\
+\hline
+5. Multi-language & Tiếng Việt vs English & FinBERT (English) + PhoBERT (Vietnamese), Auto language detect \\
 \hline
 \end{tabular}
 \end{table}
@@ -105,43 +143,62 @@ Tài khoản Free/VIP & User Management & \texttt{users} table, VIPRequired midd
 
 \begin{lstlisting}
 Crypto-Analytics-Platform/
-|-- backend/
-|   |-- main.go
-|   |-- Dockerfile
-|   |-- internal/
-|       |-- database/
-|       |   |-- database.go
-|       |   |-- migrations.go
-|       |-- handlers/
-|       |   |-- handler.go
-|       |-- models/
-|       |   |-- models.go
-|       |-- services/
-|       |   |-- binance.go
-|       |-- websocket/
-|           |-- client.go
-|           |-- hub.go
-|-- frontend/
+|-- frontend/                    # React + Vite + TailwindCSS
 |   |-- src/
-|       |-- App.tsx
+|       |-- App.tsx              # Router configuration
+|       |-- api/
+|       |   |-- client.ts        # API client with Axios
 |       |-- components/
-|       |-- hooks/
-|       |   |-- useWebSocket.ts
+|       |   |-- Chart.tsx        # TradingView Lightweight Charts
+|       |   |-- ChartContainer.tsx
+|       |   |-- NewsSidebar.tsx
+|       |   |-- PredictionPanel.tsx
+|       |   |-- ProtectedRoute.tsx
+|       |-- contexts/
+|       |   |-- WebSocketContext.tsx  # WebSocket Provider
 |       |-- pages/
-|       |-- services/
-|           |-- api.ts
+|       |   |-- Dashboard.tsx    # Main trading view
+|       |   |-- Login.tsx        # Authentication
+|       |   |-- Register.tsx
+|       |   |-- News.tsx         # News listing
+|       |   |-- Sources.tsx      # Source management
+|       |-- types/
+|           |-- index.ts
 |-- services/
-|   |-- ai-service/
-|   |   |-- main.py
-|   |   |-- Dockerfile
-|   |   |-- requirements.txt
-|   |-- crawler/
-|       |-- main.py
-|       |-- Dockerfile
-|       |-- requirements.txt
-|       |-- CRAWLER_FLOW.md
+|   |-- auth-service/            # Golang - Authentication
+|   |   |-- cmd/main.go
+|   |   |-- internal/
+|   |       |-- handler/auth_handler.go
+|   |       |-- service/auth_service.go
+|   |       |-- repository/user_repository.go
+|   |       |-- middleware/auth.go
+|   |   |-- pkg/utils/jwt.go
+|   |-- market-service/          # Golang - Market Data
+|   |   |-- cmd/main.go
+|   |   |-- internal/
+|   |       |-- handler/market_handler.go
+|   |       |-- service/market_service.go
+|   |   |-- pkg/
+|   |       |-- binance/websocket.go   # Binance WS client
+|   |       |-- websocket/hub.go       # Client WS hub
+|   |       |-- kafka/producer.go
+|   |-- crawler-service/         # Golang - News Crawler
+|   |   |-- cmd/main.go
+|   |   |-- internal/
+|   |       |-- crawler/crawler.go     # RSS + HTML crawler
+|   |       |-- kafka/producer.go
+|   |       |-- handler/source.go
+|   |-- ai-service-python/       # Python - AI Analysis
+|       |-- main.py              # Kafka consumer
+|       |-- internal/
+|           |-- sentiment/sentiment.py # FinBERT + PhoBERT
+|           |-- gemini/gemini_client.py
+|           |-- handler/news_handler.go
+|           |-- kafka/consumer.py
+|-- docs/
+|   |-- Auth-Service.postman_collection.json
+|   |-- Crawler-Service.postman_collection.json
 |-- docker-compose.yml
-|-- ARCHITECTURE.md
 |-- README.md
 \end{lstlisting}
 
