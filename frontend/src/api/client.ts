@@ -245,11 +245,14 @@ class ApiClient {
   async getNews(params?: {
     skip?: number;
     limit?: number;
+    cursor?: number | string;
     source_id?: string;
     event_type?: string;
     language?: string;
-  }): Promise<Article[]> {
-    const response = await this.client.get<Article[]>("/news/articles", {
+    sort_by?: 'published_at' | 'created_at';
+    sort_order?: 'ASC' | 'DESC';
+  }): Promise<{ articles: Article[]; next_cursor: string | number; has_more: boolean }> {
+    const response = await this.client.get<{ articles: Article[]; next_cursor: string | number; has_more: boolean }>("/news/articles", {
       params,
     });
     return response.data;

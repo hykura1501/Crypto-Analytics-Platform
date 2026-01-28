@@ -11,6 +11,7 @@ import {
   type ISeriesMarkersPluginApi,
   CrosshairMode,
   type MouseEventParams,
+  ColorType,
 } from "lightweight-charts";
 import { apiClient } from "../api/client";
 import { type MarketPrice } from "../types";
@@ -46,7 +47,7 @@ export default function Chart({
   const [lastHistoricalCandle, setLastHistoricalCandle] =
     useState<ChartLegendData | null>(null);
 
-  const { subscribe, unsubscribe, lastMessage, getLastMessage, isConnected } =
+  const { subscribe, unsubscribe, lastMessage, getLastMessage } =
     useWebSocket();
 
   // Derive current topic message instead of storing in state
@@ -113,7 +114,7 @@ export default function Chart({
       height: chartContainerRef.current.clientHeight,
       layout: {
         background: { 
-          type: 'solid',
+          type: ColorType.Solid,
           color: "#0a0e27" // Dark background like TradingView
         },
         textColor: "#d1d4dc",
