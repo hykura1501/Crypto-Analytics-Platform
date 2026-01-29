@@ -1,120 +1,105 @@
+---
+title: "Version 5: Cloud-Native Auto-Scaling (FUTURE PROPOSAL)"
+description: "Kubernetes + Multi-Region + Data Lake (100,000-1M+ users)"
+---
+
 flowchart TB
-    subgraph GlobalCDN["Global CDN Layer"]
-        CloudFront["CloudFront CDN<br/>Static Assets"]
+    subgraph CDN["🌐 Global CDN"]
+        GlobalCDN["Content Delivery Network<br/><small>Static Assets Cache<br/>Edge Locations Worldwide</small>"]
     end
 
-    subgraph Client["Client Layer"]
-        WebApp["Web Application"]
-        MobileApp["Mobile App"]
+    subgraph Client["👤 Global Users"]
+        Users["Web + Mobile Apps<br/><small>Low Latency Worldwide</small>"]
     end
 
-    subgraph Gateway["API Gateway Layer"]
-        APIGateway["API Gateway<br/>Kong/AWS API Gateway"]
+    subgraph LB["⚖️ Global Load Balancer"]
+        GLB["Multi-Region LB<br/><small>Geo-routing<br/>Health Checks<br/>Failover</small>"]
     end
 
-    subgraph Services["Microservices - Multi-AZ Auto Scaling"]
-        subgraph MarketServiceASG["Market Data Service ASG"]
-            Market1["Market Service 1"]
-            Market2["Market Service 2"]
+    subgraph K8s["☸️ Kubernetes Cluster (Multi-AZ)"]
+        subgraph Ingress["Ingress Layer"]
+            IngressCtrl["Nginx Ingress<br/><small>+ Service Mesh (Istio)</small>"]
         end
         
-        subgraph NewsServiceASG["News Service ASG"]
-            News1["News Service 1"]
-            News2["News Service 2"]
-        end
-        
-        subgraph AIServiceASG["AI Service ASG - GPU"]
-            AI1["AI Service 1"]
-            AI2["AI Service 2"]
-        end
-        
-        subgraph AccountServiceASG["Account Service ASG"]
-            Account1["Account Service 1"]
-            Account2["Account Service 2"]
+        subgraph Deployments["Microservices Deployments (HPA)"]
+            MarketDeploy["📊 Market Service<br/><small>Replicas: 3-10<br/>CPU-based scaling</small>"]
+            NewsDeploy["🕷️ News Service<br/><small>Replicas: 2-5<br/>Queue lag scaling</small>"]
+            AIDeploy["🤖 AI Service<br/><small>Replicas: 2-8<br/>GPU nodes</small>"]
+            AuthDeploy["🔐 Auth Service<br/><small>Replicas: 3-5<br/>Connection scaling</small>"]
         end
     end
 
-    subgraph MessageBus["Message Bus - Kafka Cluster"]
-        KafkaCluster["Kafka Cluster<br/>news_raw, news_parsed<br/>price_ticks, ai_signals"]
+    subgraph Messaging["📨 Distributed Messaging"]
+        KafkaCluster["Kafka Cluster<br/><small>3+ brokers<br/>Multi-AZ replication<br/>High throughput</small>"]
     end
 
-    subgraph CacheLayer["Distributed Cache"]
-        RedisCluster["Redis Cluster"]
+    subgraph CacheLayer["⚡ Distributed Cache"]
+        RedisCluster["Redis Cluster<br/><small>Sharded + Replicated<br/>Automatic failover</small>"]
     end
 
-    subgraph DataLayer["Data Layer - Multi-AZ"]
-        subgraph RDSAZ["RDS Multi-AZ"]
-            RDSPrimary[("RDS Primary")]
-            RDSStandby[("RDS Standby")]
-            RDSReplica1[("Read Replica 1")]
-        end
-        
-        TimeSeriesDB[("InfluxDB/TimescaleDB")]
-        Elasticsearch[("Elasticsearch Cluster")]
+    subgraph DataLayer["💾 Multi-AZ Database"]
+        Primary[("Primary DB<br/><small>Write Master</small>")]
+        Standby[("Standby<br/><small>Auto-failover</small>")]
+        Replica1[("Read Replica 1")]
+        Replica2[("Read Replica 2")]
+        TimeSeries[("Time-Series DB<br/><small>InfluxDB/TimescaleDB<br/>High-frequency data</small>")]
     end
 
-    subgraph DataLake["Data Warehouse and ML Platform"]
-        S3DataLake[("S3 Data Lake")]
-        Redshift[("Redshift/BigQuery")]
-        FeatureStore[("Feature Store")]
-        SageMaker["SageMaker"]
+    subgraph Analytics["📊 Analytics & ML Platform"]
+        DataLake[("Data Lake<br/><small>Object Storage<br/>Raw data archive</small>")]
+        Warehouse[("Data Warehouse<br/><small>BigQuery/ClickHouse<br/>OLAP queries</small>")]
+        FeatureStore[("Feature Store<br/><small>Feast/Tecton<br/>ML features</small>")]
+        MLPlatform["ML Platform<br/><small>Training + Serving<br/>Model registry<br/>A/B testing</small>"]
     end
 
-    subgraph Observability["Observability Stack"]
-        Prometheus["Prometheus"]
-        Grafana["Grafana"]
-        ELK["ELK Stack"]
-        PagerDuty["PagerDuty"]
+    subgraph Observability["📈 Full Observability Stack"]
+        Metrics["Prometheus<br/><small>Metrics collection</small>"]
+        Logs["Logging<br/><small>ELK/Loki<br/>Centralized logs</small>"]
+        Traces["Tracing<br/><small>Jaeger/Zipkin<br/>Distributed traces</small>"]
+        Dashboards["Grafana<br/><small>Visualization</small>"]
+        Alerts["Alerting<br/><small>PagerDuty/Opsgenie<br/>On-call management</small>"]
     end
 
-    subgraph External["External Services"]
-        Binance["Binance API"]
-        NewsSites["News Websites"]
+    subgraph External["🌍 External APIs"]
+        Binance["Binance API<br/><small>Market data</small>"]
+        NewsAPIs["News APIs<br/><small>Multiple sources</small>"]
+        AIAPIs["AI Services<br/><small>Gemini, OpenAI</small>"]
     end
 
-    CloudFront --> WebApp
-    WebApp --> APIGateway
-    MobileApp --> APIGateway
+    GlobalCDN --> Users
+    Users --> GLB
+    GLB --> IngressCtrl
     
-    APIGateway --> MarketServiceASG
-    APIGateway --> NewsServiceASG
-    APIGateway --> AIServiceASG
-    APIGateway --> AccountServiceASG
+    IngressCtrl --> MarketDeploy
+    IngressCtrl --> NewsDeploy
+    IngressCtrl --> AIDeploy
+    IngressCtrl --> AuthDeploy
     
-    MarketServiceASG --> KafkaCluster
-    MarketServiceASG --> RedisCluster
-    MarketServiceASG --> TimeSeriesDB
-    MarketServiceASG --> Binance
+    MarketDeploy & NewsDeploy & AIDeploy --> KafkaCluster
+    MarketDeploy & AuthDeploy --> RedisCluster
     
-    NewsServiceASG --> KafkaCluster
-    NewsServiceASG --> RDSPrimary
-    NewsServiceASG --> Elasticsearch
-    NewsServiceASG --> NewsSites
+    MarketDeploy --> Primary
+    NewsDeploy & AIDeploy --> Primary
+    MarketDeploy --> Replica1
+    NewsDeploy --> Replica2
+    MarketDeploy --> TimeSeries
     
-    AIServiceASG --> KafkaCluster
-    AIServiceASG --> RedisCluster
-    AIServiceASG --> FeatureStore
+    Primary -.->|"Replication"| Standby
+    Primary -.->|"Replication"| Replica1 & Replica2
     
-    AccountServiceASG --> RDSPrimary
-    AccountServiceASG --> RedisCluster
+    KafkaCluster -->|"Stream"| DataLake
+    DataLake -->|"ETL"| Warehouse
+    Warehouse --> MLPlatform
+    MLPlatform <--> FeatureStore
     
-    RDSPrimary --> RDSStandby
-    RDSPrimary --> RDSReplica1
+    Deployments --> Metrics
+    Deployments --> Logs
+    Deployments --> Traces
+    Metrics --> Dashboards
+    Metrics --> Alerts
     
-    KafkaCluster --> S3DataLake
-    S3DataLake --> Redshift
-    S3DataLake --> SageMaker
-    SageMaker --> FeatureStore
+    MarketDeploy --> Binance
+    NewsDeploy --> NewsAPIs
+    AIDeploy --> AIAPIs
     
-    MarketServiceASG --> Prometheus
-    NewsServiceASG --> Prometheus
-    AIServiceASG --> Prometheus
-    AccountServiceASG --> Prometheus
-    
-    Prometheus --> Grafana
-    Prometheus --> PagerDuty
-    
-    MarketServiceASG --> ELK
-    NewsServiceASG --> ELK
-    AIServiceASG --> ELK
-    AccountServiceASG --> ELK
+    note1[/"<b>⚠️ FUTURE VERSION</b><br/>Not yet implemented<br/>For large-scale production<br/>Cost: $10K+/month<br/>Team: 10+ engineers"/]

@@ -3,7 +3,7 @@
 \usepackage[vietnamese]{babel}
 \usepackage{fancyhdr}
 \usepackage{amsmath}
-\usepackage[utf8]{vietnam}
+%\usepackage[utf8]{vietnam}
 \usepackage{amsfonts}
 \usepackage{xcolor}
 \usepackage{longfbox}
@@ -98,6 +98,7 @@ leftmargin=-5pt,rightmargin=-5pt,
 innerleftmargin=5pt,innerrightmargin=5pt]{mybox}
 
 \begin{document}
+\shorthandoff{"}
 \begin{titlepage}
 \pagestyle{fancy}
 \fancyhf{}
@@ -174,14 +175,17 @@ TP.Hồ Chí Minh, 01/2026
 \newpage
 
 % Include các chapter
-\input{target}
-\input{chapter_scaling}
-\input{chapter_1}
-\input{chapter_2}
-\input{chapter_ai_prediction}
-\input{flowcharts}
-\input{chapter_3}
-\input{chapter_4}
+% Ưu tiên phần kiến trúc & scaling trước, rồi mới đến các tình huống chi tiết
+\input{target}             % Mục tiêu / tổng quan bài toán
+\input{chapter_scaling}    % Quá trình scale-up kiến trúc hệ thống
+
+% Các tình huống kỹ thuật cụ thể
+\input{chapter_1}          % Tình huống 1 (WebSocket / Market)
+\input{chapter_2}          % Tình huống 2 (Crawler / News)
+\input{chapter_ai_prediction} % Tình huống AI Prediction / XAI
+\input{chapter_3}          % Tình huống 3 (Security & Auth)
+
+% Kết luận và tài liệu tham khảo
 \input{chapter_5}
 \input{tailieu}
 

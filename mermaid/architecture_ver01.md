@@ -1,28 +1,30 @@
+---
+title: "Version 1: Single Box Monolith"
+description: "MVP Architecture - All components on 1 server (10-100 users)"
+---
+
 flowchart TB
-    subgraph Client["Client"]
-        Browser["Browser/Mobile App"]
+    subgraph Client["👤 Client Layer"]
+        Browser["Browser/Mobile App<br/><small>React Frontend</small>"]
     end
 
-    subgraph VPC["VPC - Single EC2 Instance"]
+    subgraph SingleServer["🖥️ Single Server (VPS/Local Machine)"]
         subgraph Monolith["Monolithic Application"]
-            WebServer["Web Server<br/>REST API + WebSocket Server"]
-            Crawler["Crawler Service<br/>Cron Job/Background Task"]
-            AIService["AI Service<br/>Local Model .pt/.h5"]
-            AccountModule["Account Module<br/>Auth + Profile + Watchlist"]
+            WebServer["🌐 Web Server<br/>REST API + WebSocket<br/><small>Express/Flask/Golang</small>"]
+            Crawler["🕷️ Crawler Module<br/>Background Jobs<br/><small>Cron/Celery/Worker</small>"]
+            AIService["🤖 AI Module<br/>Local Models<br/><small>.pt/.h5 files</small>"]
+            AccountModule["👥 Account Module<br/>Auth + Profile<br/><small>JWT/Session</small>"]
         end
         
-        subgraph LocalDB["Local Database"]
-            PostgreSQL[("PostgreSQL/MySQL<br/>users, news, prices,<br/>signals, logs")]
-        end
-        
-        subgraph LocalStorage["Local Disk Storage"]
-            Files[("Raw HTML<br/>AI Models<br/>Logs")]
+        subgraph LocalData["Local Data Storage"]
+            PostgreSQL[("💾 PostgreSQL/MySQL<br/><small>users, news, prices,<br/>signals, logs</small>")]
+            Files[("📁 Local Disk<br/><small>Raw HTML<br/>AI Models<br/>Log files</small>")]
         end
     end
 
-    subgraph External["External Services"]
-        Binance["Binance API<br/>REST + WebSocket"]
-        NewsSites["News Sites<br/>HTTP Crawling"]
+    subgraph External["🌍 External Services"]
+        Binance["Binance API<br/><small>REST + WebSocket</small>"]
+        NewsSites["News Websites<br/><small>RSS/HTML Crawling</small>"]
     end
 
     Browser <-->|"HTTP/WebSocket<br/>Port 80/443"| WebServer
@@ -33,5 +35,5 @@ flowchart TB
     Monolith --> PostgreSQL
     Monolith --> Files
     
-    WebServer -->|"REST: History<br/>WS: Realtime"| Binance
-    Crawler -->|"HTTP Parse HTML"| NewsSites
+    WebServer -->|"Price Data"| Binance
+    Crawler -->|"News Content"| NewsSites
