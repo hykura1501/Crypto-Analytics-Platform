@@ -59,22 +59,27 @@ class ApiClient {
         // Skip refresh for auth endpoints to avoid infinite loop
         const authEndpoints = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'];
         const isAuthEndpoint = authEndpoints.some(endpoint => 
-          originalRequest.url?.includes(endpoint)
+          originalRequest?.url?.includes(endpoint)
         );
         
         // If error is 401 and we haven't tried to refresh yet
-        if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
+        if (error.response?.status === 401 && !originalRequest?._retry && !isAuthEndpoint) {
+          originalRequest._retry = true;
+
           if (this.isRefreshing) {
-            // If already refreshing, wait for the new token
-            return new Promise((resolve) => {
+            // If already refreshing, queue this request
+            return new Promise((resolve, reject) => {
               this.refreshSubscribers.push((token: string) => {
-                originalRequest.headers.Authorization = `Bearer ${token}`;
-                resolve(this.client(originalRequest));
+                if (token) {
+                  originalRequest.headers.Authorization = `Bearer ${token}`;
+                  resolve(this.client(originalRequest));
+                } else {
+                  reject(error);
+                }
               });
             });
           }
 
-          originalRequest._retry = true;
           this.isRefreshing = true;
 
           try {
@@ -83,37 +88,50 @@ class ApiClient {
               throw new Error("No refresh token available");
             }
 
-            const response = await this.refreshToken(refreshToken);
-            const { access_token } = response;
+            // Call refresh endpoint directly without going through interceptor
+            const response = await axios.post<AuthResponse>(
+              `${API_BASE_URL}${API_VERSION_PREFIX}/auth/refresh`,
+              { refresh_token: refreshToken },
+              {
+                headers: { 'Content-Type': 'application/json' },
+                withCredentials: true,
+              }
+            );
+            
+            const { access_token, refresh_token: newRefreshToken, expires_in } = response.data;
 
             // Update access token cookie with correct expiry
             Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, access_token, {
-              expires: new Date(Date.now() + response.expires_in * 1000),
+              expires: new Date(Date.now() + expires_in * 1000),
               httpOnly: false,
             });
 
             // Update refresh token if provided
-            if (response.refresh_token) {
-              Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, response.refresh_token, {
+            if (newRefreshToken) {
+              Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, newRefreshToken, {
                 expires: 7, // 7 days
                 httpOnly: false,
               });
             }
 
-            // Notify all subscribers
+            // Notify all queued requests with new token
             this.refreshSubscribers.forEach((cb) => cb(access_token));
             this.refreshSubscribers = [];
 
-            // Retry original request
+            // Retry original request with new token
             originalRequest.headers.Authorization = `Bearer ${access_token}`;
             return this.client(originalRequest);
           } catch (refreshError) {
-            // Refresh failed, redirect to login
+            // Refresh failed, notify queued requests and redirect to login
+            this.refreshSubscribers.forEach((cb) => cb(''));
             this.refreshSubscribers = [];
-            this.isRefreshing = false;
             Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
             Cookies.remove(COOKIE_NAMES.REFRESH_TOKEN);
-            window.location.href = "/login";
+            
+            // Only redirect if we're not already on the login page
+            if (window.location.pathname !== '/login') {
+              window.location.href = "/login";
+            }
             return Promise.reject(refreshError);
           } finally {
             this.isRefreshing = false;

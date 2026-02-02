@@ -131,29 +131,25 @@ services:
       - "traefik.http.services.auth.loadbalancer.server.port=8081"
       - "traefik.http.routers.auth.middlewares=cors-headers"
 
-  # # Market Service
+  # Market Service (scale: docker compose up -d --scale market-service=3)
+  # Traefik tự load-balance giữa các instance (round-robin).
   market-service:
     build:
       context: ./services/market-service
       dockerfile: Dockerfile
-    container_name: crypto_market_service
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    ports:
-      - "8082:8082"
     networks:
       - crypto-network
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      # Route: /api/v1/market/*
       - "traefik.http.routers.market.rule=PathPrefix(`/api/v1/market`)"
       - "traefik.http.services.market.loadbalancer.server.port=8082"
       - "traefik.http.routers.market.middlewares=cors-headers"
-      # Route: /ws/* (WebSocket)
       - "traefik.http.routers.market-ws.rule=PathPrefix(`/ws`)"
       - "traefik.http.routers.market-ws.service=market"
       - "traefik.http.routers.market-ws.middlewares=cors-headers"
@@ -176,7 +172,6 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      # Route: /api/v1/news/*
       - "traefik.http.routers.crawler.rule=PathPrefix(`/api/v1/news`)"
       - "traefik.http.services.crawler.loadbalancer.server.port=8083"
       - "traefik.http.routers.crawler.middlewares=cors-headers"

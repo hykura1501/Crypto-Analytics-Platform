@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import type { CreateSourceRequest, UpdateSourceRequest, Source } from '../types';
+import Layout from '../components/Layout';
 
 export default function SourceForm() {
   const navigate = useNavigate();
@@ -97,48 +98,53 @@ export default function SourceForm() {
 
   if (loading && isEdit && !source) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500">Loading source...</div>
-      </div>
+      <Layout>
+        <div className="flex items-center justify-center py-20">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-4 border-[#26a69a] border-t-transparent rounded-full animate-spin"></div>
+            <div className="text-[#d1d4dc] text-sm font-medium">Loading source...</div>
+          </div>
+        </div>
+      </Layout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <Layout>
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
+      <div className="bg-[#131722] border-b border-[#2a2e39] px-6 py-4">
+        <div className="flex items-center justify-between container mx-auto">
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate('/sources')}
-              className="text-gray-600 hover:text-gray-900"
+              className="text-[#758696] hover:text-[#d1d4dc] transition-colors"
             >
               ← Back to Sources
             </button>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="text-2xl font-bold text-[#d1d4dc]">
               {isEdit ? 'Edit Source' : 'Create New Source'}
             </h1>
           </div>
         </div>
-      </header>
+      </div>
 
       {/* Main Content */}
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white shadow rounded-lg">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="bg-[#131722] border border-[#2a2e39] shadow-xl rounded-lg">
           <form onSubmit={handleSubmit} className="p-6 space-y-6">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md">
+              <div className="bg-[#ef5350] bg-opacity-90 text-white px-4 py-3 rounded-md border border-[#ef5350]">
                 {error}
               </div>
             )}
 
             {/* Basic Information */}
-            <div className="border-b border-gray-200 pb-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">Basic Information</h2>
+            <div className="border-b border-[#2a2e39] pb-6">
+              <h2 className="text-lg font-medium text-[#d1d4dc] mb-4">Basic Information</h2>
               <div className="grid grid-cols-1 gap-6">
                 <div>
-                  <label htmlFor="source_id" className="block text-sm font-medium text-gray-700 mb-2">
-                    Source ID <span className="text-red-500">*</span>
+                  <label htmlFor="source_id" className="block text-sm font-medium text-[#758696] mb-2">
+                    Source ID <span className="text-[#ef5350]">*</span>
                   </label>
                   <input
                     type="text"
@@ -148,17 +154,17 @@ export default function SourceForm() {
                     disabled={isEdit}
                     value={formData.source_id}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed placeholder-[#758696]/50"
                     placeholder="e.g., CoinDesk"
                   />
                   {isEdit && (
-                    <p className="mt-1 text-xs text-gray-500">Source ID cannot be changed</p>
+                    <p className="mt-1 text-xs text-[#758696]">Source ID cannot be changed</p>
                   )}
                 </div>
 
                 <div>
-                  <label htmlFor="rss_url" className="block text-sm font-medium text-gray-700 mb-2">
-                    RSS URL <span className="text-red-500">*</span>
+                  <label htmlFor="rss_url" className="block text-sm font-medium text-[#758696] mb-2">
+                    RSS URL <span className="text-[#ef5350]">*</span>
                   </label>
                   <input
                     type="url"
@@ -167,7 +173,7 @@ export default function SourceForm() {
                     required
                     value={formData.rss_url}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent placeholder-[#758696]/50"
                     placeholder="https://example.com/rss"
                   />
                 </div>
@@ -175,11 +181,11 @@ export default function SourceForm() {
             </div>
 
             {/* RSS Tags */}
-            <div className="border-b border-gray-200 pb-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">RSS Tags</h2>
+            <div className="border-b border-[#2a2e39] pb-6">
+              <h2 className="text-lg font-medium text-[#d1d4dc] mb-4">RSS Tags</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
-                  <label htmlFor="title_tag" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="title_tag" className="block text-sm font-medium text-[#758696] mb-2">
                     Title Tag
                   </label>
                   <input
@@ -188,13 +194,13 @@ export default function SourceForm() {
                     name="title_tag"
                     value={formData.title_tag}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent placeholder-[#758696]/50"
                     placeholder="title (default)"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="link_tag" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="link_tag" className="block text-sm font-medium text-[#758696] mb-2">
                     Link Tag
                   </label>
                   <input
@@ -203,13 +209,13 @@ export default function SourceForm() {
                     name="link_tag"
                     value={formData.link_tag}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent placeholder-[#758696]/50"
                     placeholder="link (default)"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="pub_date_tag" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="pub_date_tag" className="block text-sm font-medium text-[#758696] mb-2">
                     Pub Date Tag
                   </label>
                   <input
@@ -218,7 +224,7 @@ export default function SourceForm() {
                     name="pub_date_tag"
                     value={formData.pub_date_tag}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent placeholder-[#758696]/50"
                     placeholder="pubDate (default)"
                   />
                 </div>
@@ -227,10 +233,10 @@ export default function SourceForm() {
 
             {/* CSS Selectors */}
             <div>
-              <h2 className="text-lg font-medium text-gray-900 mb-4">CSS Selectors</h2>
+              <h2 className="text-lg font-medium text-[#d1d4dc] mb-4">CSS Selectors</h2>
               <div className="grid grid-cols-1 gap-6">
                 <div>
-                  <label htmlFor="content_selector" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="content_selector" className="block text-sm font-medium text-[#758696] mb-2">
                     Content Selector
                   </label>
                   <input
@@ -239,14 +245,14 @@ export default function SourceForm() {
                     name="content_selector"
                     value={formData.content_selector}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent font-mono text-sm placeholder-[#758696]/50"
                     placeholder="article.content"
                   />
-                  <p className="mt-1 text-xs text-gray-500">CSS selector for article content</p>
+                  <p className="mt-1 text-xs text-[#758696]">CSS selector for article content</p>
                 </div>
 
                 <div>
-                  <label htmlFor="author_selector" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="author_selector" className="block text-sm font-medium text-[#758696] mb-2">
                     Author Selector
                   </label>
                   <input
@@ -255,13 +261,13 @@ export default function SourceForm() {
                     name="author_selector"
                     value={formData.author_selector}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent font-mono text-sm placeholder-[#758696]/50"
                     placeholder=".author"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="summary_selector" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="summary_selector" className="block text-sm font-medium text-[#758696] mb-2">
                     Summary Selector
                   </label>
                   <input
@@ -270,13 +276,13 @@ export default function SourceForm() {
                     name="summary_selector"
                     value={formData.summary_selector}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent font-mono text-sm placeholder-[#758696]/50"
                     placeholder=".summary"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="tags_selector" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label htmlFor="tags_selector" className="block text-sm font-medium text-[#758696] mb-2">
                     Tags Selector
                   </label>
                   <input
@@ -285,7 +291,7 @@ export default function SourceForm() {
                     name="tags_selector"
                     value={formData.tags_selector}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
+                    className="w-full px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-md text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] focus:border-transparent font-mono text-sm placeholder-[#758696]/50"
                     placeholder=".tags"
                   />
                 </div>
@@ -293,18 +299,18 @@ export default function SourceForm() {
             </div>
 
             {/* Actions */}
-            <div className="flex items-center justify-end gap-4 pt-6 border-t border-gray-200">
+            <div className="flex items-center justify-end gap-4 pt-6 border-t border-[#2a2e39]">
               <button
                 type="button"
                 onClick={() => navigate('/sources')}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="px-4 py-2 text-sm font-medium text-[#d1d4dc] bg-[#1e222d] border border-[#2a2e39] rounded-lg hover:bg-[#252936] focus:outline-none focus:ring-2 focus:ring-[#26a69a]"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-[#26a69a] to-[#1e7a6e] rounded-lg hover:from-[#2db8a8] hover:to-[#268a7a] focus:outline-none focus:ring-2 focus:ring-[#26a69a] shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'Saving...' : isEdit ? 'Update Source' : 'Create Source'}
               </button>
@@ -312,7 +318,7 @@ export default function SourceForm() {
           </form>
         </div>
       </div>
-    </div>
+    </Layout>
   );
 }
 

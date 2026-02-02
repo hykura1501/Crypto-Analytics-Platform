@@ -16,10 +16,10 @@ export default function Dashboard() {
       onSymbolChange={setSelectedSymbol}
     >
       {/* Main Content */}
-      <div className="flex-1 p-4 overflow-hidden">
+      <div className="h-full p-4 overflow-hidden flex flex-col">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 h-full">
           {/* Charts Section - 3 columns */}
-          <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
+          <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 grid-rows-2 gap-4 h-full">
             <ChartContainer symbol={selectedSymbol} defaultInterval="1m" />
             <ChartContainer symbol={selectedSymbol} defaultInterval="5m" />
             <ChartContainer symbol={selectedSymbol} defaultInterval="15m" />

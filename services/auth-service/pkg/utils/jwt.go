@@ -85,11 +85,6 @@ func (m *JWTManager) ValidateToken(tokenString string) (*JWTClaims, error) {
 		return nil, ErrInvalidToken
 	}
 
-	// Check if token is expired
-	if claims.ExpiresAt.Before(time.Now()) {
-		return nil, ErrExpiredToken
-	}
-
 	return claims, nil
 }
 

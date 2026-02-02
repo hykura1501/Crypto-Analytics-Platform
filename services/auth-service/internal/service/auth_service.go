@@ -99,13 +99,7 @@ func (s *authService) Login(req *model.LoginRequest) (*model.AuthResponse, error
 }
 
 func (s *authService) RefreshToken(refreshToken string) (*model.AuthResponse, error) {
-	// Validate refresh token
-	claims, err := s.jwtManager.ValidateToken(refreshToken)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if refresh token exists in database
+	// Check if refresh token exists in database first
 	tokenRecord, err := s.refreshTokenRepo.FindByToken(refreshToken)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -114,16 +108,30 @@ func (s *authService) RefreshToken(refreshToken string) (*model.AuthResponse, er
 		return nil, err
 	}
 
-	// Check if token is expired
+	// Check if token is expired in database
 	if tokenRecord.ExpiresAt.Before(time.Now()) {
 		s.refreshTokenRepo.DeleteByToken(refreshToken)
 		return nil, errors.New("refresh token expired")
+	}
+
+	// Validate refresh token JWT structure
+	claims, err := s.jwtManager.ValidateToken(refreshToken)
+	if err != nil {
+		// Token is invalid or malformed, remove from database
+		s.refreshTokenRepo.DeleteByToken(refreshToken)
+		return nil, errors.New("invalid refresh token")
 	}
 
 	// Get user
 	user, err := s.userRepo.FindByID(claims.UserID)
 	if err != nil {
 		return nil, ErrUserNotFound
+	}
+
+	// Check if user is active
+	if !user.IsActive {
+		s.refreshTokenRepo.DeleteByToken(refreshToken)
+		return nil, errors.New("user account is deactivated")
 	}
 
 	// Delete old refresh token
