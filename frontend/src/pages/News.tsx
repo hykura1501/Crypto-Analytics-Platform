@@ -1,9 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { type Article, type Source } from '../types';
 import { apiClient } from '../api/client';
 import Layout from '../components/Layout';
 
 export default function News() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [articles, setArticles] = useState<Article[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
@@ -12,12 +14,25 @@ export default function News() {
   const [nextCursor, setNextCursor] = useState<string | number | null>(null);
   const [hasMore, setHasMore] = useState(true);
   
-  // Filters
-  const [selectedSource, setSelectedSource] = useState<string>('');
-  const [sortBy, setSortBy] = useState<'published_at' | 'created_at'>('published_at');
-  const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
+  // Filters from URL or defaults
+  const selectedSource = searchParams.get('source') || '';
+  const sortBy = (searchParams.get('sort_by') as 'published_at' | 'created_at') || 'published_at';
+  const sortOrder = (searchParams.get('sort_order') as 'ASC' | 'DESC') || 'DESC';
   
   const observerTarget = useRef<HTMLDivElement>(null);
+
+  // Update URL params helper
+  const updateParams = (key: string, value: string) => {
+    setSearchParams(prev => {
+      const newParams = new URLSearchParams(prev);
+      if (value) {
+        newParams.set(key, value);
+      } else {
+        newParams.delete(key);
+      }
+      return newParams;
+    });
+  };
 
   // Fetch sources for filter
   useEffect(() => {
@@ -147,7 +162,7 @@ export default function News() {
               <label className="text-sm font-medium text-[#d1d4dc]">Source:</label>
               <select
                 value={selectedSource}
-                onChange={(e) => setSelectedSource(e.target.value)}
+                onChange={(e) => updateParams('source', e.target.value)}
                 className="px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-lg text-sm text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] hover:bg-[#252936] transition-all cursor-pointer"
               >
                 <option value="" className="bg-[#1e222d] text-[#d1d4dc]">All Sources</option>
@@ -164,7 +179,7 @@ export default function News() {
               <label className="text-sm font-medium text-[#d1d4dc]">Sort By:</label>
               <select
                 value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as 'published_at' | 'created_at')}
+                onChange={(e) => updateParams('sort_by', e.target.value)}
                 className="px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-lg text-sm text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] hover:bg-[#252936] transition-all cursor-pointer"
               >
                 <option value="published_at" className="bg-[#1e222d] text-[#d1d4dc]">Published Date</option>
@@ -177,7 +192,7 @@ export default function News() {
               <label className="text-sm font-medium text-[#d1d4dc]">Order:</label>
               <select
                 value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value as 'ASC' | 'DESC')}
+                onChange={(e) => updateParams('sort_order', e.target.value)}
                 className="px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-lg text-sm text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] hover:bg-[#252936] transition-all cursor-pointer"
               >
                 <option value="DESC" className="bg-[#1e222d] text-[#d1d4dc]">Newest First</option>

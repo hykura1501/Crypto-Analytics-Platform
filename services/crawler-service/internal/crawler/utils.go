@@ -2,7 +2,6 @@ package crawler
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"github.com/gocolly/colly/v2"
 	"golang.org/x/net/html"
 )
@@ -162,47 +160,39 @@ func min(a, b int) int {
 	return b
 }
 
-// fetchHTMLWithBrowser uses chromedp to fetch and render HTML with JavaScript
+// fetchHTMLWithBrowser uses colly to fetch HTML content (imitating browser behavior)
 func fetchHTMLWithBrowser(url string) (string, error) {
-	// Allocator options for Chrome
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("disable-extensions", true),
-		chromedp.Flag("disable-setuid-sandbox", true),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-	)
-
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
-
-	// Create browser context
-	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
-	defer cancel()
-
-	// Set timeout for the operation
-	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
 	var htmlContent string
+	var errFetch error
 
-	// Navigate to URL and wait for network idle, then get HTML
-	err := chromedp.Run(ctx,
-		chromedp.Navigate(url),
-		// Wait for the article content to be loaded
-		chromedp.WaitReady("body"),
-		// Give JavaScript time to render
-		chromedp.Sleep(3*time.Second),
-		// Get the fully rendered HTML
-		chromedp.OuterHTML("html", &htmlContent),
-	)
+	c := setupBrowserLikeCollector()
 
+	// Set a reasonable timeout
+	c.SetRequestTimeout(30 * time.Second)
+
+	// Capture the response body
+	c.OnResponse(func(r *colly.Response) {
+		htmlContent = string(r.Body)
+	})
+
+	// Capture errors
+	c.OnError(func(r *colly.Response, err error) {
+		errFetch = err
+	})
+
+	err := c.Visit(url)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch HTML with browser: %w", err)
+		return "", fmt.Errorf("failed to visit URL: %w", err)
 	}
 
-	log.Printf("✅ Fetched rendered HTML from %s (%d bytes)", url, len(htmlContent))
+	if errFetch != nil {
+		return "", fmt.Errorf("failed to fetch content: %w", errFetch)
+	}
+
+	if htmlContent == "" {
+		return "", fmt.Errorf("empty response from %s", url)
+	}
+
+	log.Printf("✅ Fetched HTML from %s (%d bytes)", url, len(htmlContent))
 	return htmlContent, nil
 }
