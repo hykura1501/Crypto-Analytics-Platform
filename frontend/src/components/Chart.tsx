@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createChart,
   type IChartApi,
   type ISeriesApi,
   type CandlestickData,
   type Time,
-  type SeriesMarker,
   CandlestickSeries,
-  createSeriesMarkers,
-  type ISeriesMarkersPluginApi,
+  LineSeries,
+  type LineData,
   CrosshairMode,
   type MouseEventParams,
   ColorType,
@@ -20,7 +19,12 @@ import { useWebSocket } from "../contexts/WebSocketContext";
 interface ChartProps {
   symbol?: string;
   interval?: string;
-  selectedNewsTime?: number | null;
+  indicators?: {
+    ma25?: boolean;
+    ma50?: boolean;
+    ema12?: boolean;
+    ema26?: boolean;
+  };
 }
 
 interface ChartLegendData {
@@ -31,15 +35,58 @@ interface ChartLegendData {
   color: string;
 }
 
+function computeSMA(
+  candles: CandlestickData<Time>[],
+  period: number
+): LineData<Time>[] {
+  if (period <= 0) return [];
+  const out: LineData<Time>[] = [];
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    sum += c.close;
+    if (i >= period) sum -= candles[i - period].close;
+    if (i >= period - 1) {
+      out.push({ time: c.time, value: sum / period });
+    }
+  }
+  return out;
+}
+
+function computeEMA(
+  candles: CandlestickData<Time>[],
+  period: number
+): LineData<Time>[] {
+  if (period <= 0 || candles.length < period) return [];
+  const out: LineData<Time>[] = [];
+  const k = 2 / (period + 1);
+
+  // Seed EMA with SMA of first `period` closes
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += candles[i].close;
+  let ema = sum / period;
+  out.push({ time: candles[period - 1].time, value: ema });
+
+  for (let i = period; i < candles.length; i++) {
+    ema = candles[i].close * k + ema * (1 - k);
+    out.push({ time: candles[i].time, value: ema });
+  }
+  return out;
+}
+
 export default function Chart({
   symbol = "BTCUSDT",
   interval = "1h",
-  selectedNewsTime,
+  indicators: indicatorsProp,
 }: ChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const ma25SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const ma50SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema12SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema26SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const candlesRef = useRef<CandlestickData<Time>[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoverLegendData, setHoverLegendData] =
@@ -50,13 +97,56 @@ export default function Chart({
   const { subscribe, unsubscribe, lastMessage, getLastMessage } =
     useWebSocket();
 
+  const indicators = useMemo(() => {
+    return {
+      ma25: indicatorsProp?.ma25 ?? true,
+      ma50: indicatorsProp?.ma50 ?? true,
+      ema12: indicatorsProp?.ema12 ?? true,
+      ema26: indicatorsProp?.ema26 ?? true,
+    };
+  }, [
+    indicatorsProp?.ma25,
+    indicatorsProp?.ma50,
+    indicatorsProp?.ema12,
+    indicatorsProp?.ema26,
+  ]);
+
   // Derive current topic message instead of storing in state
   const currentTopicMessage = useMemo(() => {
+    // `lastMessage` is used as a render trigger for updates.
+    void lastMessage;
     const topic = `market:${symbol}:${interval}`;
     return getLastMessage(topic);
   }, [symbol, interval, lastMessage, getLastMessage]);
+
+  const applyIndicators = useMemo(() => {
+    return (candles: CandlestickData<Time>[]) => {
+      if (!candles.length) {
+        ma25SeriesRef.current?.setData([]);
+        ma50SeriesRef.current?.setData([]);
+        ema12SeriesRef.current?.setData([]);
+        ema26SeriesRef.current?.setData([]);
+        return;
+      }
+
+      // Compute and set series data (bounded to history size)
+      if (ma25SeriesRef.current) {
+        ma25SeriesRef.current.setData(computeSMA(candles, 25));
+      }
+      if (ma50SeriesRef.current) {
+        ma50SeriesRef.current.setData(computeSMA(candles, 50));
+      }
+      if (ema12SeriesRef.current) {
+        ema12SeriesRef.current.setData(computeEMA(candles, 12));
+      }
+      if (ema26SeriesRef.current) {
+        ema26SeriesRef.current.setData(computeEMA(candles, 26));
+      }
+    };
+  }, []);
+
   // Load historical data function
-  const loadHistoricalData = async (sym: string, inter: string) => {
+  const loadHistoricalData = useCallback(async (sym: string, inter: string) => {
     if (!candlestickSeriesRef.current) return;
 
     setIsLoading(true);
@@ -81,6 +171,8 @@ export default function Chart({
       );
 
       candlestickSeriesRef.current.setData(formattedData);
+      candlesRef.current = formattedData;
+      applyIndicators(formattedData);
 
       // Set initial legend data from the last candle
       if (formattedData.length > 0) {
@@ -102,7 +194,7 @@ export default function Chart({
       setError(apiError.response?.data?.message || errorMessage);
       setIsLoading(false);
     }
-  };
+  }, [applyIndicators]);
 
   // Initialize chart
   useEffect(() => {
@@ -186,8 +278,35 @@ export default function Chart({
 
     candlestickSeriesRef.current = candlestickSeries;
 
-    // Create markers plugin for the series
-    markersPluginRef.current = createSeriesMarkers(candlestickSeries);
+    // Add indicator line series
+    ma25SeriesRef.current = chart.addSeries(LineSeries, {
+      color: "#f59e0b",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    }) as ISeriesApi<"Line">;
+    ma50SeriesRef.current = chart.addSeries(LineSeries, {
+      color: "#ec4899",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    }) as ISeriesApi<"Line">;
+    ema12SeriesRef.current = chart.addSeries(LineSeries, {
+      color: "#22c55e",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    }) as ISeriesApi<"Line">;
+    ema26SeriesRef.current = chart.addSeries(LineSeries, {
+      color: "#06b6d4",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    }) as ISeriesApi<"Line">;
 
     // Subscribe to crosshair move to update legend
     chart.subscribeCrosshairMove((param: MouseEventParams) => {
@@ -227,7 +346,7 @@ export default function Chart({
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, loadHistoricalData]);
 
   // WebSocket subscription
   useEffect(() => {
@@ -254,7 +373,22 @@ export default function Chart({
 
     // Update the last candle or add new one
     candlestickSeriesRef.current.update(candle);
-  }, [currentTopicMessage]);
+
+    // Maintain local candle buffer for indicators (replace last if same time)
+    const buf = candlesRef.current;
+    const last = buf[buf.length - 1];
+    if (!last) {
+      candlesRef.current = [candle];
+    } else if (last.time === candle.time) {
+      buf[buf.length - 1] = candle;
+    } else {
+      buf.push(candle);
+      // Keep buffer bounded (history API uses 1000)
+      if (buf.length > 1500) buf.splice(0, buf.length - 1500);
+    }
+
+    applyIndicators(candlesRef.current);
+  }, [currentTopicMessage, applyIndicators]);
 
   // Derive current legend data
   let currentLegendData = hoverLegendData;
@@ -277,32 +411,14 @@ export default function Chart({
     }
   }
 
-  // Add marker when news is selected
+  // Toggle indicator visibility
   useEffect(() => {
-    if (!selectedNewsTime || !markersPluginRef.current) {
-      // Clear markers if no news selected
-      if (markersPluginRef.current) {
-        markersPluginRef.current.setMarkers([]);
-      }
-      return;
-    }
-
-    const marker: SeriesMarker<Time> = {
-      time: (selectedNewsTime / 1000) as Time,
-      position: "belowBar",
-      color: "#2196F3",
-      shape: "circle",
-      size: 2,
-      text: "News",
-    };
-
-    // Set markers using the plugin
-    try {
-      markersPluginRef.current.setMarkers([marker]);
-    } catch (err) {
-      console.warn("Could not set markers:", err);
-    }
-  }, [selectedNewsTime]);
+    const opts = indicators;
+    ma25SeriesRef.current?.applyOptions({ visible: !!opts.ma25 });
+    ma50SeriesRef.current?.applyOptions({ visible: !!opts.ma50 });
+    ema12SeriesRef.current?.applyOptions({ visible: !!opts.ema12 });
+    ema26SeriesRef.current?.applyOptions({ visible: !!opts.ema26 });
+  }, [indicators]);
 
   return (
     <div className="w-full h-full flex flex-col relative bg-[#0a0e27] rounded-lg overflow-hidden">
