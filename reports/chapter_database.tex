@@ -1,0 +1,148 @@
+% =============================================================================
+% CƠ SỞ DỮ LIỆU
+% =============================================================================
+
+\section{Cơ sở dữ liệu}
+\label{sec:database}
+
+\subsection{Thiết kế cơ sở dữ liệu}
+
+Hệ thống sử dụng \textbf{PostgreSQL 15} làm cơ sở dữ liệu chính.
+
+\subsubsection{Sơ đồ quan hệ (DBML)}
+
+Hình~\ref{fig:dbml} minh họa sơ đồ quan hệ các bảng.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{dbml.png}
+\caption{Sơ đồ quan hệ cơ sở dữ liệu (DBML)}
+\label{fig:dbml}
+\end{figure}
+
+\paragraph{Các bảng chính:}
+
+\begin{itemize}
+    \item \textbf{users} (Auth Service): Người dùng, phân quyền ADMIN/NORMAL/VIP.
+    \item \textbf{refresh\_tokens} (Auth Service): Token làm mới phiên đăng nhập.
+    \item \textbf{sources} (Crawler Service): Nguồn tin RSS (CoinDesk, CoinTelegraph, v.v.) kèm CSS selectors (Gemini AI).
+    \item \textbf{articles} (Crawler Service): Bài viết crawl được, có \texttt{sentiment\_score} cập nhật bởi AI Service.
+    \item \textbf{market\_prices} (Market Service): Dữ liệu nến (KLINE) từ Binance API.
+\end{itemize}
+
+\subsubsection{Mô tả chi tiết bảng}
+
+\begin{table}[H]
+\centering
+\caption{Bảng users (Auth Service)}
+\begin{tabular}{|l|l|l|l|}
+\hline
+\textbf{Cột} & \textbf{Kiểu} & \textbf{Ràng buộc} & \textbf{Mô tả} \\
+\hline
+id & SERIAL & PK & Primary key \\
+email & VARCHAR(255) & UNIQUE, NOT NULL & Email đăng nhập \\
+password\_hash & VARCHAR(255) & NOT NULL & Mật khẩu bcrypt \\
+first\_name, last\_name & VARCHAR & & Tên người dùng \\
+role & VARCHAR(20) & DEFAULT NORMAL & ADMIN, NORMAL, VIP \\
+is\_active & BOOLEAN & DEFAULT true & Trạng thái tài khoản \\
+created\_at, updated\_at & TIMESTAMP & & Thời gian \\
+deleted\_at & TIMESTAMP & INDEX & Soft delete (GORM) \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Bảng articles (Crawler Service)}
+\begin{tabular}{|l|l|l|l|}
+\hline
+\textbf{Cột} & \textbf{Kiểu} & \textbf{Ràng buộc} & \textbf{Mô tả} \\
+\hline
+id & SERIAL & PK & Primary key \\
+source\_id & VARCHAR(100) & FK, NOT NULL & Nguồn tin \\
+url & VARCHAR(2000) & UNIQUE, NOT NULL & URL bài viết \\
+title & VARCHAR(1000) & NOT NULL & Tiêu đề \\
+content\_text & TEXT & NOT NULL & Nội dung \\
+sentiment\_score & FLOAT & & Điểm sentiment (AI) \\
+language & VARCHAR(5) & DEFAULT 'en' & en / vi \\
+published\_at, crawled\_at & TIMESTAMP & & Thời gian \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Bảng market\_prices (Market Service)}
+\begin{tabular}{|l|l|l|l|}
+\hline
+\textbf{Cột} & \textbf{Kiểu} & \textbf{Ràng buộc} & \textbf{Mô tả} \\
+\hline
+symbol & VARCHAR(20) & PK & BTCUSDT, ETHUSDT, ... \\
+time & TIMESTAMP & PK & Thời điểm nến đóng \\
+interval & VARCHAR(10) & PK & 1m, 5m, 1h, 4h, 1d \\
+open, high, low, close & DECIMAL(20,8) & & OHLC \\
+volume & DECIMAL(20,8) & & Khối lượng \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Chiến lược mở rộng cơ sở dữ liệu}
+
+Hiện tại hệ thống triển khai \textbf{single-node PostgreSQL} trong Docker Compose. Các chiến lược mở rộng sau có thể áp dụng khi scale lên production:
+
+\subsubsection{Replication và Read Replicas}
+
+\begin{itemize}
+    \item \textbf{Đề xuất}: Triển khai PostgreSQL Streaming Replication (1 Primary + N Read Replicas).
+    \item \textbf{Cách hoạt động}: Primary xử lý ghi (INSERT/UPDATE), Read Replicas phục vụ truy vấn đọc (SELECT).
+    \item \textbf{Phân chia tải}: Auth Service (login/validate) và Crawler Service (list articles) có thể đọc từ replicas; Market Service (WebSocket + insert candles) ghi vào primary.
+    \item \textbf{Trạng thái hiện tại}: Chưa triển khai. Cần cấu hình \texttt{wal\_level=replica}, \texttt{primary\_conninfo} trên replica.
+\end{itemize}
+
+\subsubsection{Sharding}
+
+\begin{itemize}
+    \item \textbf{Đề xuất khi scale}: Sharding theo \texttt{symbol} cho bảng \texttt{market\_prices} (time-series data lớn).
+    \item \textbf{Lý do}: Mỗi cặp tiền (BTCUSDT, ETHUSDT, ...) có luồng dữ liệu độc lập; sharding giảm kích thước bảng và tăng throughput ghi.
+    \item \textbf{Trạng thái hiện tại}: Chưa triển khai. Có thể dùng Citus hoặc application-level sharding.
+\end{itemize}
+
+\subsection{Kỹ thuật tối ưu hóa tại cấp độ database}
+
+\subsubsection{Indexing}
+
+Hệ thống đã triển khai các index sau (từ source code):
+
+\begin{table}[H]
+\centering
+\caption{Các index đã triển khai}
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Bảng} & \textbf{Index} & \textbf{Mục đích} \\
+\hline
+users & idx trên email (UNIQUE) & Tra cứu đăng nhập \\
+users & idx trên deleted\_at & Lọc soft-deleted \\
+refresh\_tokens & idx trên user\_id & Tìm token theo user \\
+refresh\_tokens & idx trên token (UNIQUE) & Validate refresh token \\
+articles & idx\_articles\_source\_id & Lọc theo nguồn tin \\
+articles & idx\_articles\_url (UNIQUE) & Tránh trùng lặp URL \\
+articles & idx\_articles\_published\_at & Sắp xếp thời gian \\
+market\_prices & idx\_market\_prices\_symbol\_time & Time-series theo symbol \\
+market\_prices & idx\_market\_prices\_time & Truy vấn theo thời gian \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Partitioning}
+
+\begin{itemize}
+    \item \textbf{Trạng thái}: Chưa triển khai partitioning.
+    \item \textbf{Đề xuất}: Bảng \texttt{market\_prices} phù hợp với \textbf{Range Partitioning} theo \texttt{time} (theo tháng hoặc theo quý) khi dữ liệu lớn. Giúp \texttt{VACUUM} và truy vấn nhanh hơn.
+\end{itemize}
+
+\subsubsection{Caching tại cấp độ database}
+
+\begin{itemize}
+    \item \textbf{Redis} (ngoài PostgreSQL): AI Service sử dụng Redis để cache kết quả prediction với key \texttt{prediction:\{symbol\}:\{horizon\}h} và TTL 5--30 phút tùy horizon.
+    \item \textbf{PostgreSQL}: Sử dụng shared\_buffers mặc định. Có thể tăng \texttt{shared\_buffers} và \texttt{effective\_cache\_size} khi tối ưu production.
+\end{itemize}

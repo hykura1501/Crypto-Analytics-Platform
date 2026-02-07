@@ -1,0 +1,71 @@
+% =============================================================================
+% KẾT LUẬN VÀ ĐÁNH GIÁ
+% =============================================================================
+
+\section{Kết luận và Đánh giá}
+\label{sec:ket-luan-danh-gia}
+
+\subsection{Đánh giá hiệu quả kiến trúc và thay đổi đã thực hiện}
+
+\subsubsection{Kiến trúc Microservices}
+
+Kiến trúc microservices với event-driven (Kafka) đã chứng minh hiệu quả:
+\begin{itemize}
+    \item \textbf{Tách biệt trách nhiệm}: Auth, Market, Crawler, AI mỗi service một nhiệm vụ rõ ràng; sửa lỗi hoặc nâng cấp một service không ảnh hưởng các service khác.
+    \item \textbf{Scale độc lập}: Có thể scale Market Service (WebSocket) và Crawler Service theo nhu cầu tải khác nhau.
+    \item \textbf{Công nghệ đa dạng}: Golang cho real-time và crawler; Python cho AI/ML; React cho frontend --- mỗi layer dùng công nghệ phù hợp.
+\end{itemize}
+
+\subsubsection{Thay đổi và cải tiến đã thực hiện}
+
+\begin{itemize}
+    \item \textbf{WebSocket Hub với Topic-based subscription}: Thay vì broadcast toàn bộ, mỗi client chỉ nhận dữ liệu cho symbol/timeframe đã subscribe --- giảm tải mạng và CPU.
+    \item \textbf{Gemini AI cho CSS Selector}: Giảm công sức bảo trì khi website nguồn tin thay đổi layout.
+    \item \textbf{Explainable AI (SHAP)}: Tăng độ tin cậy của dự đoán; người dùng hiểu lý do model đưa ra kết quả.
+    \item \textbf{Redis Cache cho Prediction}: Giảm gọi AI Service lặp lại; cải thiện thời gian phản hồi cho người dùng VIP.
+\end{itemize}
+
+\subsection{Bài học kinh nghiệm}
+
+\begin{enumerate}
+    \item \textbf{Thiết kế chấp nhận lỗi}: Mọi service trong hệ thống phân tán đều có thể fail. Cần có fallback (ví dụ: AI Service down thì ẩn Prediction Panel, vẫn hiển thị biểu đồ và tin tức).
+    
+    \item \textbf{Stateless và external state}: Services stateless dễ scale; state lưu ở PostgreSQL và Redis thay vì trong memory.
+    
+    \item \textbf{Security by Design}: JWT + Refresh Token, role-based middleware, không tin input từ client --- validate và sanitize mọi nơi.
+    
+    \item \textbf{Observability}: Logging, metrics, tracing là cần thiết; khi triển khai production nên bổ sung Prometheus, Grafana, centralized logging.
+    
+    \item \textbf{Documentation và contracts}: API contracts (OpenAPI), schema DBML, mermaid diagrams giúp onboarding và bảo trì dễ dàng hơn.
+\end{enumerate}
+
+\subsection{Đề xuất cải tiến và phát triển tương lai}
+
+Dựa trên kinh nghiệm thu được (chi tiết hơn xem phần Kết luận và Bài học rút ra):
+\begin{itemize}
+    \item \textbf{Kubernetes}: Migrate từ Docker Compose sang K8s; HPA cho auto-scaling; multi-AZ cho high availability.
+    \item \textbf{Service Mesh}: Istio/Linkerd cho mTLS, traffic management, distributed tracing tự động.
+    \item \textbf{Advanced ML}: Thử LSTM/Transformer cho time-series; online learning; A/B testing models.
+    \item \textbf{CI/CD}: GitHub Actions cho automated test và deploy; blue-green deployment.
+    \item \textbf{Read Replicas}: PostgreSQL replication cho read-heavy workloads (list articles, validate token).
+\end{itemize}
+
+\subsection{Thuận lợi và khó khăn khi làm đồ án}
+
+\subsubsection{Thuận lợi}
+
+\begin{itemize}
+    \item \textbf{Công nghệ sẵn có}: Golang, Python, React, PostgreSQL, Kafka, Redis đều có tài liệu phong phú và cộng đồng lớn.
+    \item \textbf{Binance API}: REST và WebSocket miễn phí, documentation rõ ràng; dễ tích hợp dữ liệu giá real-time.
+    \item \textbf{HuggingFace}: FinBERT, PhoBERT pre-trained sẵn; giảm thời gian train model sentiment.
+    \item \textbf{Docker Compose}: Triển khai toàn bộ stack (Postgres, Redis, Kafka, services) trên máy local một lệnh; dễ phát triển và demo.
+\end{itemize}
+
+\subsubsection{Khó khăn}
+
+\begin{itemize}
+    \item \textbf{Đồng bộ time-series}: Align tin tức với giá theo time buckets (process\_news) phức tạp; phải xử lý timezone, định dạng ngày tháng khác nhau từ các nguồn.
+    \item \textbf{HTML thay đổi}: Các trang tin tức thường đổi layout; giải pháp Gemini AI giúp giảm công bảo trì nhưng vẫn cần kiểm tra định kỳ.
+    \item \textbf{Scale WebSocket}: Một Hub instance có giới hạn connections; khi cần scale đa server phải thiết kế lại (Kafka, Redis Pub/Sub).
+    \item \textbf{Chi phí AI}: Gemini API và models HuggingFace tốn tài nguyên; cần cache (Redis) và tối ưu gọi API.
+\end{itemize}

@@ -218,7 +218,7 @@ Luồng refresh token được thiết kế theo hướng ``rotation'' (mỗi l�
 \node[box, fill=orange!30, below=1.5cm of client] (gateway) {API Gateway\\Rate Limit + Auth};
 
 % Auth Service
-\node[box, fill=yellow!30, right=2cm of gateway] (auth) {Auth Service\\OAuth2 + JWT};
+\node[box, right=2cm of gateway] (auth) {Auth Service\\OAuth2 + JWT};
 
 % Redis
 \node[box, fill=red!30, below=1.2cm of auth] (redis) {Redis\\Token Store};
