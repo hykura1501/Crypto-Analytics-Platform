@@ -238,8 +238,10 @@ class PredictionPipeline:
         
         logger.info(f"Data after merging: {len(df)} samples")
         
-        # Create target (future price)
-        df['target'] = df['close'].shift(-horizon_hours)
+        # Create target: percentage return (more stable than raw price)
+        # target = (future_price - current_price) / current_price * 100
+        future_close = df['close'].shift(-horizon_hours)
+        df['target'] = (future_close - df['close']) / df['close'] * 100
         df = df.dropna(subset=['target'])
         
         if df.empty:
@@ -288,27 +290,20 @@ class PredictionPipeline:
         model.fit(X_train, y_train)
         self.models[model_key] = model
         
-        # Evaluate
+        # Evaluate (y is now % return, not raw price)
         y_pred = model.predict(X_test)
-        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-        mae = mean_absolute_error(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))  # RMSE in % units
+        mae = mean_absolute_error(y_test, y_pred)  # MAE in % units
         
-        # Directional accuracy
+        # Directional accuracy: correct sign of predicted return (UP vs DOWN)
         if len(y_test) > 1:
-            y_test_series = pd.Series(y_test.values, index=y_test.index)
-            y_pred_series = pd.Series(y_pred, index=y_test.index)
-            direction_true = np.sign(y_test_series.diff().iloc[1:])
-            direction_pred = np.sign(y_pred_series.diff().iloc[1:])
-            # Ensure same index for comparison
-            common_idx = direction_true.index.intersection(direction_pred.index)
-            if len(common_idx) > 0:
-                dir_acc = (direction_true.loc[common_idx] == direction_pred.loc[common_idx]).mean() * 100
-            else:
-                dir_acc = 0.0
+            direction_true = np.sign(y_test)
+            direction_pred = np.sign(y_pred)
+            dir_acc = (direction_true == direction_pred).mean() * 100
         else:
             dir_acc = 0.0
         
-        logger.info(f"Test RMSE: {rmse:.2f}, MAE: {mae:.2f}, Directional Accuracy: {dir_acc:.1f}%")
+        logger.info(f"Test RMSE: {rmse:.2f}%, MAE: {mae:.2f}%, Directional Accuracy: {dir_acc:.1f}%")
         
         # Initialize SHAP explainer
         try:
@@ -359,9 +354,16 @@ class PredictionPipeline:
         latest = df.iloc[[-1]]
         X = latest[feature_names].fillna(0)
         
-        # Predict
+        # Predict (model outputs percentage return, not raw price)
         current_price = self._sanitize_float(float(latest['close'].iloc[0]))
-        predicted_price = self._sanitize_float(float(model.predict(X)[0]))
+        predicted_return_pct = float(model.predict(X)[0])
+        
+        # Clip predicted return to reasonable bounds
+        max_change_pct = {1: 4, 4: 8, 24: 12}.get(horizon_hours, 8)
+        predicted_return_pct = np.clip(predicted_return_pct, -max_change_pct, max_change_pct)
+        
+        predicted_price = current_price * (1 + predicted_return_pct / 100)
+        predicted_price = self._sanitize_float(float(predicted_price))
         
         # Ensure prices are valid numbers
         if current_price is None:
