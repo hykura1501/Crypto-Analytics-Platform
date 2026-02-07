@@ -10,10 +10,10 @@ export default function ChartContainer({ symbol, defaultInterval }: ChartContain
   const [interval, setInterval] = useState(defaultInterval);
   const intervals = ['1m', '5m', '15m', '1h', '4h', '1d'];
   const [indicators, setIndicators] = useState({
-    ma25: true,
-    ma50: true,
-    ema12: true,
-    ema26: true,
+    ma25: false,
+    ma50: false,
+    ema12: false,
+    ema26: false,
   });
 
   return (
