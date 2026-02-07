@@ -13,7 +13,7 @@
 \usepackage{amssymb}
 \usepackage{pgf,tikz,pgfplots}
 \usepackage{graphicx}
-\graphicspath{ {figures/} }
+\graphicspath{ {figures/} {photo/} {./} }
 \usepackage{array}
 \usepackage{cases}
 \usepackage{listings}
@@ -119,6 +119,20 @@ innerleftmargin=5pt,innerrightmargin=5pt]{mybox}
 
    \end{tikzpicture}
 
+  
+\begin{center}
+\fontsize{12}{12}\selectfont
+\textbf{ĐẠI HỌC QUỐC GIA THÀNH PHỐ HỒ CHÍ MINH}\\
+\textbf{TRƯỜNG ĐẠI HỌC KHOA HỌC TỰ NHIÊN}\\
+\textbf{KHOA: CÔNG NGHỆ THÔNG TIN}
+\end{center}
+
+\begin{figure}[H]
+\begin{center}
+\includegraphics[scale=0.3]{logo.png}
+\end{center}
+\end{figure}
+
 \begin{center}
 \fontsize{20}{14}\selectfont
 \textbf{KIẾN TRÚC PHẦN MỀM}\\
@@ -175,18 +189,15 @@ TP.Hồ Chí Minh, 01/2026
 \newpage
 
 % Include các chapter
+\input{chapter_tu_danh_gia} % Tự đánh giá (đầu báo cáo)
 % Ưu tiên phần kiến trúc & scaling trước, rồi mới đến các tình huống chi tiết
-\input{target}             % Mục tiêu / tổng quan bài toán
+\input{chapter_database}   % Thiết kế cơ sở dữ liệu
+\input{chapter_architecture} % Kiến trúc hệ thống (Version 4)
 \input{chapter_scaling}    % Quá trình scale-up kiến trúc hệ thống
-
-% Các tình huống kỹ thuật cụ thể
-\input{chapter_1}          % Tình huống 1 (WebSocket / Market)
-\input{chapter_2}          % Tình huống 2 (Crawler / News)
-\input{chapter_ai_prediction} % Tình huống AI Prediction / XAI
-\input{chapter_3}          % Tình huống 3 (Security & Auth)
-
-% Kết luận và tài liệu tham khảo
-\input{chapter_5}
+\input{chapter_design_patterns} % Áp dụng Design Patterns
+\input{chapter_ung_dung}   % Phần ứng dụng (tính năng, GUI)
+\input{chapter_nang_cao}   % Các phần nâng cao khác (đã gộp nội dung ch 1,2,3,5,ai)
+\input{chapter_ket_luan_danh_gia} % Kết luận và Đánh giá
 \input{tailieu}
 
 \end{document}

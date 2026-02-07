@@ -1,0 +1,112 @@
+// =============================================================================
+// Crypto Analytics Platform - Database Schema (DBML)
+// Nguồn: phân tích từ source code (auth-service, crawler-service, market-service)
+// Database: PostgreSQL 15 - crypto_db
+// =============================================================================
+
+Project crypto_analytics {
+  database_type: 'PostgreSQL'
+  Note: 'Crypto Analytics Platform - Schema từ source code'
+}
+
+// -----------------------------------------------------------------------------
+// AUTH SERVICE - users, refresh_tokens
+// -----------------------------------------------------------------------------
+
+Table users [headercolor: #3498db] {
+  id int [pk, increment, note: 'Primary key']
+  email varchar(255) [unique, not null, note: 'Email đăng nhập']
+  password_hash varchar(255) [not null, note: 'bcrypt hash']
+  first_name varchar(255)
+  last_name varchar(255)
+  role varchar(20) [default: 'NORMAL', not null, note: 'ADMIN|NORMAL|VIP']
+  is_active boolean [default: true]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+  deleted_at timestamp [note: 'Soft delete - GORM']
+  
+  indexes {
+    deleted_at
+  }
+}
+
+Table refresh_tokens [headercolor: #3498db] {
+  id int [pk, increment]
+  user_id int [not null, ref: > users.id]
+  token varchar(255) [unique, not null]
+  expires_at timestamp [not null]
+  created_at timestamp [not null]
+  
+  indexes {
+    user_id
+  }
+}
+
+// -----------------------------------------------------------------------------
+// CRAWLER SERVICE - sources, articles
+// -----------------------------------------------------------------------------
+
+Table sources [headercolor: #9b59b6] {
+  source_id varchar(100) [pk, note: 'e.g. CoinDesk, CoinTelegraph']
+  rss_url varchar(2000) [not null]
+  title_tag varchar(100)
+  link_tag varchar(100)
+  pub_date_tag varchar(100)
+  summary_selector text [note: 'CSS selector - Gemini AI']
+  content_selector text
+  author_selector text
+  tags_selector text
+  created_at timestamp [not null, default: `NOW()`]
+  updated_at timestamp [not null, default: `NOW()`]
+}
+
+Table articles [headercolor: #9b59b6] {
+  id serial [pk]
+  source_id varchar(100) [not null, ref: > sources.source_id]
+  url varchar(2000) [unique, not null]
+  title varchar(1000) [not null]
+  author varchar(1000)
+  published_at varchar(150)
+  crawled_at timestamp [not null, default: `NOW()`]
+  content_text text [not null]
+  language varchar(5) [default: 'en', note: 'en|vi']
+  tags varchar(1000)
+  summary text
+  sentiment_score float [note: 'Cập nhật bởi AI Service']
+  created_at timestamp [not null, default: `NOW()`]
+  updated_at timestamp [not null, default: `NOW()`]
+  
+  indexes {
+    source_id
+    url [unique]
+    published_at
+  }
+}
+
+// -----------------------------------------------------------------------------
+// MARKET SERVICE - market_prices (candlestick/KLINE)
+// -----------------------------------------------------------------------------
+
+Table market_prices [headercolor: #e74c3c] {
+  symbol varchar(20) [note: 'BTCUSDT, ETHUSDT, ...']
+  time timestamp
+  interval varchar(10) [note: '1m, 5m, 15m, 1h, 4h, 1d']
+  open decimal(20,8)
+  high decimal(20,8)
+  low decimal(20,8)
+  close decimal(20,8)
+  volume decimal(20,8)
+  
+  indexes {
+    (symbol, time, interval) [pk]
+    (symbol, time)
+    time
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Relationships
+// -----------------------------------------------------------------------------
+// users 1---* refresh_tokens
+// sources 1---* articles
+// market_prices: standalone (no FK - data từ Binance API)

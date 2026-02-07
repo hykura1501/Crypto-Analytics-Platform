@@ -1,0 +1,164 @@
+% =============================================================================
+% ÁP DỤNG DESIGN PATTERNS
+% =============================================================================
+
+\section{Áp dụng Design Patterns}
+\label{sec:design-patterns}
+
+Hệ thống Crypto Analytics Platform áp dụng nhiều mẫu Design Patterns quan trọng, giúp mã nguồn dễ bảo trì, mở rộng và tái sử dụng. Phần này xác định các pattern đã triển khai, giải thích ý nghĩa, lợi ích và minh họa bằng sơ đồ Mermaid (mã nguồn trong \texttt{mermaid/}).
+
+\subsection{Singleton / Single Instance}
+
+\subsubsection{Mô tả}
+
+\textbf{Intent}: Đảm bảo class chỉ có một instance và cung cấp điểm truy cập toàn cục.
+
+\subsubsection{Áp dụng trong hệ thống}
+
+\begin{enumerate}
+    \item \textbf{WebSocket Hub} (\texttt{market-service/pkg/websocket/hub.go}): Một instance Hub duy nhất quản lý tất cả WebSocket clients và topic subscriptions. Tất cả connections đều gửi/nhận qua cùng một Hub.
+    
+    \item \textbf{Redis Cache} (\texttt{ai-service-python/internal/cache/redis\_cache.py}): Module-level instance \texttt{cache = RedisCache()} được import và dùng chung toàn AI Service cho prediction cache.
+\end{enumerate}
+
+\subsubsection{Lợi ích}
+
+\begin{itemize}
+    \item \textbf{WebSocket Hub}: Tránh phân mảnh kết nối, quản lý tập trung subscriptions, dễ broadcast theo topic.
+    \item \textbf{Redis Cache}: Một kết nối Redis dùng chung, tiết kiệm tài nguyên, đảm bảo cache nhất quán.
+\end{itemize}
+
+\subsubsection{Sơ đồ minh họa}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{pattern_singleton}
+\caption{Singleton Pattern: WebSocket Hub và Redis Cache}
+\label{fig:pattern-singleton}
+\end{figure}
+
+\subsection{Adapter Pattern}
+
+\subsubsection{Mô tả}
+
+\textbf{Intent}: Cho phép objects có interface không tương thích làm việc cùng nhau thông qua lớp wrapper.
+
+\subsubsection{Áp dụng trong hệ thống}
+
+\textbf{Binance Client} (\texttt{market-service/pkg/binance/client.go}): Binance API trả về mảng \texttt{[][]interface{}} cho Klines; hệ thống cần \texttt{[]*model.MarketPrice}. Hàm \texttt{parseKline()} đóng vai trò Adapter chuyển đổi format Binance sang format nội bộ.
+
+\subsubsection{Lợi ích}
+
+\begin{itemize}
+    \item Tách biệt logic xử lý API bên ngoài khỏi domain model.
+    \item Dễ thay thế hoặc thêm nguồn dữ liệu khác (CoinGecko, Kraken) mà không thay đổi core logic.
+\end{itemize}
+
+\subsubsection{Sơ đồ minh họa}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{pattern_adapter}
+\caption{Adapter Pattern: Binance API $\rightarrow$ MarketPrice}
+\label{fig:pattern-adapter}
+\end{figure}
+
+\subsection{Observer Pattern (Pub/Sub)}
+
+\subsubsection{Mô tả}
+
+\textbf{Intent}: Định nghĩa quan hệ one-to-many: khi object chủ thay đổi, tất cả observers được thông báo.
+
+\subsubsection{Áp dụng trong hệ thống}
+
+\textbf{Topic-based WebSocket Hub}: Clients subscribe vào topics (e.g., \texttt{btcusdt@kline\_1m}); khi có dữ liệu mới từ Binance WebSocket, Hub broadcast đến tất cả clients đã subscribe topic đó. Clients là observers, Hub là subject.
+
+\subsubsection{Lợi ích}
+
+\begin{itemize}
+    \item Loose coupling: Clients không cần biết nguồn dữ liệu.
+    \item Dễ scale: Thêm clients mới chỉ cần subscribe topic tương ứng.
+\end{itemize}
+
+\subsubsection{Sơ đồ minh họa}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{pattern_observer}
+\caption{Observer Pattern: Topic-based WebSocket Hub}
+\label{fig:pattern-observer}
+\end{figure}
+
+\subsection{Strategy Pattern (implicit)}
+
+\subsubsection{Mô tả}
+
+\textbf{Intent}: Định nghĩa họ thuật toán, đóng gói từng thuật toán và cho phép thay thế linh hoạt.
+
+\subsubsection{Áp dụng trong hệ thống}
+
+\textbf{Sentiment Analysis} (\texttt{ai-service-python/internal/sentiment/sentiment.py}): Hai chiến lược khác nhau --- FinBERT cho tiếng Anh, PhoBERT cho tiếng Việt. Pipeline tự động chọn model dựa trên \texttt{language} của bài viết.
+
+\subsubsection{Lợi ích}
+
+\begin{itemize}
+    \item Dễ thêm ngôn ngữ mới (chỉ cần thêm strategy mới).
+    \item Logic chọn model tập trung, dễ test.
+\end{itemize}
+
+\subsubsection{Sơ đồ minh họa}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{pattern_strategy}
+\caption{Strategy Pattern: Sentiment (FinBERT / PhoBERT)}
+\label{fig:pattern-strategy}
+\end{figure}
+
+\subsection{Template Method (implicit)}
+
+\subsubsection{Mô tả}
+
+\textbf{Intent}: Định nghĩa skeleton của thuật toán trong superclass, subclass override các bước cụ thể.
+
+\subsubsection{Áp dụng trong hệ thống}
+
+\textbf{Prediction Pipeline} (\texttt{ai-service-python/internal/prediction.py}): Pipeline cố định: \texttt{load\_price\_data()} $\rightarrow$ \texttt{load\_news\_data()} $\rightarrow$ \texttt{process\_news()} (align với price buckets) $\rightarrow$ \texttt{create\_price\_features()} $\rightarrow$ \texttt{train()}/\texttt{predict()}. Các bước cụ thể có thể điều chỉnh (features, horizons) nhưng luồng tổng thể không đổi.
+
+\subsubsection{Lợi ích}
+
+\begin{itemize}
+    \item Đảm bảo thứ tự xử lý đúng (news alignment, feature engineering).
+    \item Tái sử dụng logic chung, tránh lặp code.
+\end{itemize}
+
+\subsubsection{Sơ đồ minh họa}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{pattern_template_method}
+\caption{Template Method: Prediction Pipeline}
+\label{fig:pattern-template}
+\end{figure}
+
+\subsection{Tổng kết Design Patterns}
+
+\begin{table}[H]
+\centering
+\caption{Các Design Patterns đã áp dụng}
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Pattern} & \textbf{Vị trí} & \textbf{Mục đích} \\
+\hline
+Singleton & WebSocket Hub, Redis Cache & Single instance, shared state \\
+\hline
+Adapter & Binance Client parseKline & Chuyển đổi API format \\
+\hline
+Observer & Topic-based WebSocket & Pub/Sub real-time \\
+\hline
+Strategy & Sentiment (FinBERT/PhoBERT) & Chọn model theo ngôn ngữ \\
+\hline
+Template Method & Prediction Pipeline & Luồng xử lý cố định \\
+\hline
+\end{tabular}
+\end{table}

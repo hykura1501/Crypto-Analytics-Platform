@@ -29,7 +29,6 @@ V2 & Separated Data & 100-1K & Tách Database + Storage & Single app server \\
 \hline
 V3 & Horizontal Scale & 1K-10K & Load Balancer + Workers & Monolithic codebase \\
 \hline
-\rowcolor{yellow!30}
 V4 & Microservices & 10K-100K & \textbf{4 services + Kafka (Hiện tại)} & Cost \& Complexity \\
 \hline
 V5 & Cloud Native & 100K-1M+ & Auto-scaling + Analytics & Operational overhead \\
@@ -716,7 +715,7 @@ Full monitoring, logging, tracing:
 \centering
 \caption{So sánh chi tiết các phiên bản kiến trúc}
 \resizebox{\textwidth}{!}{
-\begin{tabular}{|l|c|c|c|>{\columncolor{yellow!30}}c|c|}
+\begin{tabular}{|l|c|c|c|c|c|}
 \hline
 \textbf{Đặc điểm} & \textbf{V1} & \textbf{V2} & \textbf{V3} & \textbf{V4 (Hiện tại)} & \textbf{V5} \\
 \hline
