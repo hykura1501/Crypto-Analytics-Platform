@@ -99,10 +99,10 @@ export default function Chart({
 
   const indicators = useMemo(() => {
     return {
-      ma25: indicatorsProp?.ma25 ?? true,
-      ma50: indicatorsProp?.ma50 ?? true,
-      ema12: indicatorsProp?.ema12 ?? true,
-      ema26: indicatorsProp?.ema26 ?? true,
+      ma25: indicatorsProp?.ma25 ?? false,
+      ma50: indicatorsProp?.ma50 ?? false,
+      ema12: indicatorsProp?.ema12 ?? false,
+      ema26: indicatorsProp?.ema26 ?? false,
     };
   }, [
     indicatorsProp?.ma25,
@@ -160,15 +160,15 @@ export default function Chart({
         limit: 1000,
       });
 
-      const formattedData: CandlestickData<Time>[] = response.data.map(
-        (price: MarketPrice) => ({
+      const formattedData: CandlestickData<Time>[] = response.data
+        .map((price: MarketPrice) => ({
           time: (new Date(price.time).getTime() / 1000) as Time,
           open: price.open,
           high: price.high,
           low: price.low,
           close: price.close,
-        })
-      );
+        }))
+        .sort((a, b) => (a.time as number) - (b.time as number));
 
       candlestickSeriesRef.current.setData(formattedData);
       candlesRef.current = formattedData;
@@ -196,7 +196,7 @@ export default function Chart({
     }
   }, [applyIndicators]);
 
-  // Initialize chart
+  // Initialize chart (use indicators for initial visibility; do NOT add to deps to avoid full remount on checkbox toggle)
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
@@ -308,6 +308,13 @@ export default function Chart({
       crosshairMarkerVisible: false,
     }) as ISeriesApi<"Line">;
 
+    // Apply indicator visibility immediately (critical when symbol/interval changes,
+    // since the visibility effect only runs when indicators change)
+    ma25SeriesRef.current.applyOptions({ visible: !!indicators.ma25 });
+    ma50SeriesRef.current.applyOptions({ visible: !!indicators.ma50 });
+    ema12SeriesRef.current.applyOptions({ visible: !!indicators.ema12 });
+    ema26SeriesRef.current.applyOptions({ visible: !!indicators.ema26 });
+
     // Subscribe to crosshair move to update legend
     chart.subscribeCrosshairMove((param: MouseEventParams) => {
       if (param.time && param.seriesData.get(candlestickSeries)) {
@@ -346,6 +353,8 @@ export default function Chart({
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
+  // indicators intentionally omitted: used for initial visibility only; adding would remount chart on every checkbox toggle
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, interval, loadHistoricalData]);
 
   // WebSocket subscription
@@ -371,12 +380,16 @@ export default function Chart({
       close: currentTopicMessage.close,
     };
 
+    const buf = candlesRef.current;
+    const last = buf[buf.length - 1];
+
+    // Skip stale/out-of-order updates (lightweight-charts requires asc order)
+    if (last && (time as number) < (last.time as number)) return;
+
     // Update the last candle or add new one
     candlestickSeriesRef.current.update(candle);
 
     // Maintain local candle buffer for indicators (replace last if same time)
-    const buf = candlesRef.current;
-    const last = buf[buf.length - 1];
     if (!last) {
       candlesRef.current = [candle];
     } else if (last.time === candle.time) {

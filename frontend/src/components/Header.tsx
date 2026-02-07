@@ -24,7 +24,7 @@ export default function Header({
     navigate('/login');
   };
 
-  const symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT'];
+  const symbols = (import.meta.env.VITE_SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT').split(',').map((s: string) => s.trim());
 
   const isActive = (path: string) => {
     return location.pathname === path;
