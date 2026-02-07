@@ -249,6 +249,7 @@ export default function Chart({
         borderVisible: true,
       },
       rightPriceScale: {
+        visible: true,
         borderColor: "#2a2e39",
         borderVisible: true,
         scaleMargins: {
@@ -337,7 +338,7 @@ export default function Chart({
       loadHistoricalData(symbol, interval);
     }, 0);
 
-    // Handle resize
+    // Handle resize - cả window và container (khi panel mở/đóng)
     const handleResize = () => {
       if (chartContainerRef.current && chart) {
         chart.applyOptions({
@@ -348,9 +349,14 @@ export default function Chart({
     };
 
     window.addEventListener("resize", handleResize);
+    const resizeObserver = new ResizeObserver(handleResize);
+    if (chartContainerRef.current) {
+      resizeObserver.observe(chartContainerRef.current);
+    }
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       chart.remove();
     };
   // indicators intentionally omitted: used for initial visibility only; adding would remount chart on every checkbox toggle
