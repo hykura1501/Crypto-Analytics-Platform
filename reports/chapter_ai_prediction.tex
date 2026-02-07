@@ -1,0 +1,396 @@
+% =============================================================================
+% DỰ ĐOÁN GIÁ VỚI EXPLAINABLE AI (XAI)
+% =============================================================================
+
+\section{Dự đoán Giá với Explainable AI (XAI)}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{sequence/sequence_ai_prediction_flow.png}
+\caption{Sequence Diagram: AI Prediction Flow với SHAP Explainable AI}
+\label{fig:seq-ai-prediction}
+\end{figure}
+
+\subsection{Bối cảnh}
+
+Trong hệ thống phân tích tiền mã hóa, ngoài việc thu thập tin tức và phân tích sentiment, yêu cầu quan trọng là có thể:
+\begin{itemize}
+    \item Dự đoán xu hướng giá (UP/DOWN) trong các khung thời gian khác nhau (1h, 4h, 24h)
+    \item Kết hợp dữ liệu tin tức với giá lịch sử để đưa ra dự đoán chính xác hơn
+    \item \textbf{Giải thích lý do} tại sao mô hình đưa ra dự đoán đó (Explainable AI)
+\end{itemize}
+
+\subsection{Vấn đề với AI Hộp đen}
+
+\noindent\textbf{Tại sao cần Explainable AI?:}
+
+\begin{enumerate}
+    \item \textbf{Thiếu tin tưởng}: Người dùng không muốn đầu tư dựa trên dự đoán mà không hiểu lý do
+    \item \textbf{Regulatory compliance}: Các quy định tài chính yêu cầu giải thích quyết định AI
+    \item \textbf{Debug và cải thiện}: Không thể cải thiện model nếu không hiểu nó hoạt động như thế nào
+    \item \textbf{Bias detection}: Phát hiện các yếu tố không mong muốn ảnh hưởng đến dự đoán
+\end{enumerate}
+
+\subsection{Giải pháp: XGBoost + SHAP Pipeline}
+
+\noindent\textbf{Kiến trúc Prediction Pipeline:}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm,
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.8cm, align=center, font=\small, rounded corners}
+]
+
+% Data Sources
+\node[box, fill=yellow!30] (prices) {Price Data\\Binance 1h};
+\node[box, fill=cyan!30, right=2cm of prices] (news) {News Data\\Sentiment Scores};
+
+% Feature Engineering
+\node[box, fill=orange!30, below=1.5cm of prices] (techfeat) {Technical Features\\RSI, MACD, SMA};
+\node[box, fill=orange!30, below=1.5cm of news] (newsfeat) {News Features\\Sentiment MA};
+
+% Model
+\node[box, fill=green!30, below right=1.5cm and -0.5cm of techfeat] (xgboost) {XGBoost\\Regressor};
+
+% Explainer
+\node[box, fill=red!30, below=1.2cm of xgboost] (shap) {SHAP\\Explainer};
+
+% Outputs
+\node[box, fill=purple!30, below left=1.2cm and 0.5cm of shap] (prediction) {Predicted Price\\+ Confidence};
+\node[box, fill=purple!30, below right=1.2cm and 0.5cm of shap] (explanation) {Feature\\Contributions};
+
+% Arrows
+\draw[->, thick] (prices) -- (techfeat);
+\draw[->, thick] (news) -- (newsfeat);
+\draw[->, thick] (techfeat) -- (xgboost);
+\draw[->, thick] (newsfeat) -- (xgboost);
+\draw[->, thick] (xgboost) -- (shap);
+\draw[->, thick] (shap) -- (prediction);
+\draw[->, thick] (shap) -- (explanation);
+
+\end{tikzpicture}
+\caption{AI Prediction Pipeline với SHAP Explainer}
+\end{figure}
+
+\noindent\textbf{Prediction Pipeline Implementation:}
+
+Class \texttt{PredictionPipeline} (file: \texttt{ai-service-python/internal/prediction.py}) quản lý toàn bộ pipeline:
+
+\begin{itemize}
+    \item \textbf{Models storage}: Dictionary lưu models cho từng cặp (symbol, horizon), ví dụ: BTCUSDT-4h, ETHUSDT-24h
+    
+    \item \textbf{Feature configs}: Lưu tên features được sử dụng cho mỗi model để đảm bảo consistency
+    
+    \item \textbf{SHAP explainers}: Pre-computed explainers cho fast inference
+    
+    \item \textbf{Data loading}:
+    \begin{itemize}
+        \item Load price data: Query \texttt{market\_prices} table với filter theo symbol, interval='1h', timerange
+        \item Load news data: Query \texttt{articles} table với sentiment scores đã calculated
+        \item Default: 2 years price history, 730 days news
+    \end{itemize}
+\end{itemize}
+
+\subsection{Feature Engineering}
+
+\noindent\textbf{Technical Indicators:}
+
+Method \texttt{create\_price\_features()} tạo các technical indicators từ price data:
+
+\begin{itemize}
+    \item \textbf{Returns}: \texttt{return\_1h}, \texttt{return\_24h} - tỷ lệ thay đổi giá
+    \item \textbf{Volatility}: \texttt{volatility\_24h} - độ biến động rolling 24h
+    \item \textbf{Moving Averages}: \texttt{sma\_7}, \texttt{sma\_24} - đường trung bình động
+    \item \textbf{RSI}: Relative Strength Index (14 periods) - đo overbought/oversold
+    \item \textbf{MACD}: Moving Average Convergence Divergence - momentum indicator
+    \item \textbf{Lag features}: \texttt{close\_lag\_1}, \texttt{close\_lag\_24} - giá quá khứ
+\end{itemize}
+
+\noindent\textbf{News Sentiment Features:}
+
+Method \texttt{process\_news()} align tin tức với price data theo time buckets:
+
+\begin{itemize}
+    \item \textbf{Time alignment}: Round timestamps về hourly buckets (floor to 1h)
+    \item \textbf{Aggregation per hour}:
+    \begin{itemize}
+        \item \texttt{sentiment\_mean}: Trung bình sentiment trong giờ đó
+        \item \texttt{news\_count}: Số lượng bài viết trong giờ
+        \item \texttt{sentiment\_std}: Standard deviation của sentiment
+        \item \texttt{positive\_count}: Số bài positive (sentiment > 0.1)
+    \end{itemize}
+    
+    \item \textbf{Derived features}:
+    \begin{itemize}
+        \item \texttt{sentiment\_positive\_ratio}: Tỷ lệ bài viết positive
+        \item \texttt{sentiment\_lag\_1h}, \texttt{sentiment\_lag\_6h}: Sentiment trễ 1h và 6h
+        \item \texttt{sentiment\_ma\_24h}: Rolling average 24h
+        \item \texttt{sentiment\_std\_24h}: Rolling std 24h
+    \end{itemize}
+    
+    \item \textbf{Merge strategy}: Left join price data với news aggregates, fill missing với 0
+\end{itemize}
+
+\subsection{Model Training với XGBoost}
+
+Method \texttt{train()} thực hiện training pipeline hoàn chỉnh:
+
+\begin{enumerate}
+    \item \textbf{Data loading}:
+    \begin{itemize}
+        \item Load 2 years price history (default)
+        \item Load 730 days news với sentiment scores
+    \end{itemize}
+    
+    \item \textbf{Feature engineering}:
+    \begin{itemize}
+        \item Create technical indicators (RSI, MACD, SMA, returns, volatility)
+        \item Align news với price theo time buckets
+        \item Total ~30 features (balanced: 70\% technical, 30\% news)
+    \end{itemize}
+    
+    \item \textbf{Target creation}:
+    \begin{itemize}
+        \item Target = future price sau \texttt{horizon\_hours} (1h, 4h, 24h)
+        \item Shift(-horizon) để tạo supervised learning problem
+    \end{itemize}
+    
+    \item \textbf{Train/Test split}:
+    \begin{itemize}
+        \item 80\% training data (chronological order)
+        \item 20\% test data (most recent)
+        \item No random shuffle - preserve temporal order
+    \end{itemize}
+    
+    \item \textbf{XGBoost configuration}:
+    \begin{itemize}
+        \item n\_estimators=200 (số trees)
+        \item max\_depth=6 (độ sâu cây)
+        \item learning\_rate=0.05 (slow learning)
+        \item subsample=0.8, colsample\_bytree=0.8 (regularization)
+    \end{itemize}
+    
+    \item \textbf{SHAP explainer initialization}:
+    \begin{itemize}
+        \item TreeExplainer cho XGBoost models
+        \item Pre-compute để fast inference
+    \end{itemize}
+    
+    \item \textbf{Evaluation metrics}:
+    \begin{itemize}
+        \item RMSE: Root Mean Squared Error cho giá dự đoán
+        \item Directional accuracy: \% dự đoán đúng hướng (UP/DOWN)
+    \end{itemize}
+\end{enumerate}
+
+\subsection{SHAP Explainability}
+
+\noindent\textbf{Giới thiệu SHAP (SHapley Additive exPlanations):}
+
+SHAP là phương pháp XAI dựa trên lý thuyết trò chơi Shapley value:
+\begin{itemize}
+    \item \textbf{Shapley Value}: Phân bổ ``đóng góp'' của mỗi feature vào prediction cuối cùng
+    \item \textbf{Local Explanation}: Giải thích cho từng prediction cụ thể
+    \item \textbf{Feature Importance}: Tổng hợp importance từ nhiều predictions
+\end{itemize}
+
+\textbf{Công thức Shapley Value}:
+$$\phi_i = \sum_{S \subseteq N \setminus \{i\}} \frac{|S|!(|N|-|S|-1)!}{|N|!} [v(S \cup \{i\}) - v(S)]$$
+
+Trong đó:
+\begin{itemize}
+    \item $\phi_i$: Shapley value của feature $i$
+    \item $N$: Tập tất cả features
+    \item $S$: Một subset của features (không bao gồm $i$)
+    \item $v(S)$: Giá trị prediction khi chỉ sử dụng features trong $S$
+\end{itemize}
+
+\noindent\textbf{SHAP Implementation:}
+
+Method \texttt{predict()} kết hợp prediction với SHAP explanation:
+
+\begin{enumerate}
+    \item \textbf{Load model và explainer}: Lấy pre-trained model và SHAP explainer cho cặp (symbol, horizon)
+    
+    \item \textbf{Make prediction}:
+    \begin{itemize}
+        \item Lấy latest data point với tất cả features
+        \item Model predict future price
+        \item Calculate predicted change percentage
+    \end{itemize}
+    
+    \item \textbf{SHAP Explanation}:
+    \begin{itemize}
+        \item Compute SHAP values cho tất cả features
+        \item Sort theo absolute contribution
+        \item Lấy top 10 features có impact lớn nhất
+    \end{itemize}
+    
+    \item \textbf{Feature categorization}:
+    \begin{itemize}
+        \item News features: chứa 'sentiment' hoặc 'news' trong tên
+        \item Technical features: RSI, MACD, SMA, returns, volatility
+        \item Calculate news influence percentage
+    \end{itemize}
+    
+    \item \textbf{Response structure}:
+    \begin{itemize}
+        \item \texttt{predicted\_price}: Giá dự đoán
+        \item \texttt{predicted\_change\_pct}: Phần trăm thay đổi
+        \item \texttt{feature\_analysis}: Top features và SHAP contributions
+        \item \texttt{explanation}: Human-readable factors
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Phân tích Nhân quả (Causal Analysis)}
+
+\noindent\textbf{Kết hợp Tin tức và Giá:}
+
+Hệ thống thực hiện causal analysis qua 3 mechanisms:
+
+\begin{enumerate}
+    \item \textbf{Time-aligned Features}: News được align với price theo hourly buckets để đảm bảo temporal consistency
+    
+    \item \textbf{Lag Features}: 
+    \begin{itemize}
+        \item \texttt{sentiment\_lag\_1h}: Sentiment 1 giờ trước (capture immediate impact)
+        \item \texttt{sentiment\_lag\_6h}: Sentiment 6 giờ trước (capture delayed reaction)
+        \item \texttt{sentiment\_ma\_24h}: Rolling average 24h (capture trend)
+    \end{itemize}
+    
+    \item \textbf{SHAP Contributions}: Xác định feature nào thực sự có causal impact lên prediction (không chỉ correlation)
+\end{enumerate}
+
+\noindent\textbf{Top News Articles với Keywords:}
+
+Hệ thống extract top influential news articles:
+
+\begin{itemize}
+    \item \textbf{Time window}: Lookback = max(horizon × 2, 48 hours)
+    \item \textbf{Selection}: Lấy 3 bài viết gần nhất trong window
+    \item \textbf{Keyword extraction}: 
+    \begin{itemize}
+        \item Sử dụng attention weights từ FinBERT/PhoBERT
+        \item Extract top 5 keywords có attention score cao nhất
+        \item Keywords giúp user hiểu nội dung chính của tin tức
+    \end{itemize}
+    \item \textbf{Output}: Article ID, title, sentiment score, keywords array
+\end{itemize}
+
+\subsection{Frontend: Prediction Panel}
+
+Component \texttt{PredictionPanel.tsx} hiển thị kết quả prediction với explanation:
+
+\begin{itemize}
+    \item \textbf{Price Information}:
+    \begin{itemize}
+        \item Current price và predicted price
+        \item Predicted change percentage với color coding (green/red)
+        \item Confidence score (0-100\%)
+        \item Prediction horizon (1h, 4h, 24h)
+    \end{itemize}
+    
+    \item \textbf{XAI - Key Factors}:
+    \begin{itemize}
+        \item Primary factor: Feature có SHAP value lớn nhất
+        \item News influence percentage: Tỷ lệ ảnh hưởng của tin tức
+        \item Is news important: Boolean flag
+    \end{itemize}
+    
+    \item \textbf{Recent News Section}:
+    \begin{itemize}
+        \item Hiển thị top 3 bài viết có ảnh hưởng
+        \item Mỗi bài: Title, sentiment score, keywords
+        \item Click vào bài để xem full content
+    \end{itemize}
+    
+    \item \textbf{Technical Indicators}:
+    \begin{itemize}
+        \item List các indicators quan trọng (RSI, MACD, SMA)
+        \item Badge display với color coding
+        \item Tooltip giải thích ý nghĩa
+    \end{itemize}
+    
+    \item \textbf{TypeScript Interface}:
+    \begin{itemize}
+        \item Strong typing cho prediction result
+        \item Nested objects: explanation, feature\_analysis, top\_news\_articles
+        \item Type-safe rendering trong React components
+    \end{itemize}
+\end{itemize}
+
+\subsection{Confidence Score Calculation}
+
+Confidence score được tính toán dựa trên ba yếu tố chính:
+
+\noindent\textbf{1. Feature Coverage (Độ phủ tính năng)}:
+
+Đo lường tỷ lệ số lượng tính năng có sẵn so với số lượng tối đa mong đợi:
+$$C_{feat} = \frac{N_{feat}}{30}$$
+
+trong đó $N_{feat}$ là số lượng tính năng thực tế được sử dụng, và $30$ là số lượng tính năng tối đa mong đợi.
+
+\noindent\textbf{2. News Availability (Tính sẵn có của tin tức)}:
+
+Đánh giá mức độ đầy đủ của dữ liệu tin tức gần đây so với horizon dự đoán:
+$$C_{news} = \min\left(1.0, \frac{N_{news}}{\max(10, \lfloor H/4 \rfloor)}\right)$$
+
+trong đó:
+\begin{itemize}
+    \item $N_{news}$ là số lượng tin tức gần đây có sẵn
+    \item $H$ là prediction horizon (tính bằng giờ)
+    \item Hàm $\max(10, \lfloor H/4 \rfloor)$ đảm bảo threshold tối thiểu là 10 tin tức
+\end{itemize}
+
+\noindent\textbf{3. Balance Score (Điểm cân bằng)}:
+
+Đo lường sự cân bằng giữa tính năng từ tin tức và tính năng kỹ thuật:
+$$R_{news} = \frac{N_{news\_feat}}{N_{feat}}$$
+$$B = 1 - |R_{news} - 0.3|$$
+
+trong đó:
+\begin{itemize}
+    \item $R_{news}$ là tỷ lệ tính năng từ tin tức trong tổng số tính năng
+    \item $N_{news\_feat}$ là số lượng tính năng được trích xuất từ tin tức
+    \item Giá trị lý tưởng của $R_{news}$ là $0.3$ (30\% tính năng từ tin tức)
+    \item Balance score $B$ đạt giá trị tối đa ($B = 1$) khi $R_{news} = 0.3$
+\end{itemize}
+
+\noindent\textbf{Công thức Confidence Tổng hợp}:
+
+Confidence score cuối cùng là trung bình có trọng số của ba yếu tố trên:
+$$C = 0.4 \times C_{feat} + 0.3 \times C_{news} + 0.3 \times B$$
+
+trong đó các trọng số ($0.4$, $0.3$, $0.3$) phản ánh tầm quan trọng tương đối của từng yếu tố. Confidence score $C$ có giá trị trong khoảng $[0, 1]$, với $C = 1$ biểu thị độ tin cậy cao nhất.
+
+\subsection{Kết luận}
+
+\begin{table}[H]
+\centering
+\caption{So sánh Black-box vs Explainable AI}
+\begin{tabular}{|p{4cm}|p{5cm}|p{5cm}|}
+\hline
+\textbf{Tiêu chí} & \textbf{Black-box AI} & \textbf{XAI (SHAP)} \\
+\hline
+Độ tin cậy người dùng & Thấp & Cao \\
+\hline
+Debug capability & Khó & Dễ - thấy feature contributions \\
+\hline
+Regulatory compliance & Không đạt & Đạt chuẩn \\
+\hline
+Bias detection & Không thể & Có thể phát hiện \\
+\hline
+Complexity & Thấp & Cao hơn (cần SHAP computation) \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Điểm mạnh của giải pháp}:
+\begin{itemize}
+    \item Kết hợp cả Technical Indicators và News Sentiment
+    \item SHAP explanation cho từng prediction
+    \item Hiển thị top news articles với keywords để người dùng hiểu lý do
+    \item Confidence score dựa trên nhiều yếu tố
+    \item Support multiple prediction horizons (1h, 4h, 24h)
+\end{itemize}

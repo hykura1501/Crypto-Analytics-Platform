@@ -1,0 +1,109 @@
+% =============================================================================
+% XỬ LÝ DỮ LIỆU THỜI GIAN THỰC (REAL-TIME MARKET DATA)
+% =============================================================================
+
+\section{Xử lý Dữ liệu Thị trường Thời gian thực}
+
+\begin{figure}[H]
+\centering
+% Placeholder for Sequence Diagram (Websocket)
+\includegraphics[width=\textwidth]{sequence/sequence_websocket_flow.png}
+\caption{Luồng dữ liệu thời gian thực: Binance $\to$ Market Service $\to$ Kafka/Clients}
+\label{fig:seq-market}
+\end{figure}
+
+\subsection{Bối cảnh và Thách thức}
+
+Trong các hệ thống phân tích tài chính, dữ liệu giá (price data) là trái tim của toàn bộ nền tảng. Yêu cầu đặt ra không chỉ là lưu trữ dữ liệu lịch sử mà còn phải xử lý dữ liệu thời gian thực (real-time) với độ trễ thấp nhất có thể.
+
+Các thách thức chính bao gồm:
+\begin{itemize}
+    \item \textbf{High Frequency}: Dữ liệu giao dịch từ sàn (như Binance) diễn ra liên tục với tần suất rất cao (hàng trăm events mỗi giây cho một cặp tiền).
+    \item \textbf{Low Latency}: Người dùng và các module AI cần nhận được thông tin giá mới nhất gần như tức thì để ra quyết định.
+    \item \textbf{Concurrency}: Hệ thống phải theo dõi đồng thời nhiều cặp tiền mã hóa (BTC, ETH, SOL, v.v.).
+    \item \textbf{Reliability}: Kết nối đến sàn có thể bị gián đoạn, hệ thống cần cơ chế tự động phục hồi (auto-reconnect) mà không làm mất dữ liệu quan trọng.
+\end{itemize}
+
+\subsection{Vấn đề với giải pháp truyền thống (HTTP Polling)}
+
+Một cách tiếp cận ngây thơ là sử dụng HTTP Long Polling: Client hoặc Server liên tục gửi request lên sàn mỗi giây để lấy giá mới. Tuy nhiên, phương pháp này gặp nhiều hạn chế nghiêm trọng:
+
+\begin{enumerate}
+    \item \textbf{Lãng phí tài nguyên}: Phần lớn các request trả về dữ liệu không đổi nếu thị trường ít biến động, hoặc bỏ lỡ dữ liệu nếu thị trường biến động nhanh hơn chu kỳ poll.
+    \item \textbf{Độ trễ cao (Latency)}: Luôn có một độ trễ cố định bằng ít nhất một nửa chu kỳ polling.
+    \item \textbf{Rate Limiting}: Các sàn giao dịch áp dụng giới hạn số lượng request (ví dụ: 1200 req/phút). Việc polling liên tục cho nhiều cặp tiền sẽ nhanh chóng chạm ngưỡng giới hạn này và bị chặn IP.
+\end{enumerate}
+
+\subsection{Giải pháp: Market Service với WebSocket & Event-Driven}
+
+Để giải quyết triệt để các vấn đề trên, chúng tôi xây dựng \textbf{Market Service} hoạt động dựa trên giao thức WebSocket và kiến trúc Event-Driven.
+
+\noindent\textbf{Kiến trúc tổng thể:}
+
+Market Service đóng vai trò là "Data Ingestion Gateway" chuyên biệt cho dữ liệu thị trường. Kiến trúc bao gồm các luồng xử lý chính:
+
+\begin{enumerate}
+    \item \textbf{WebSocket Ingestion Layer}:
+    \begin{itemize}
+        \item Duy trì kết nối WebSocket bền vững (persistent connection) trực tiếp với Binance Stream.
+        \item Đăng ký các stream cần thiết (ví dụ: \texttt{btcusdt@kline\_1m}, \texttt{ethusdt@kline\_1m}).
+        \item Nhận dữ liệu thụ động (push-based) ngay khi có giao dịch mới, loại bỏ hoàn toàn lãng phí của polling.
+    \end{itemize}
+
+    \item \textbf{Internal Data Broadcasting (Hub)}:
+    \begin{itemize}
+        \item Sử dụng pattern Pub/Sub nội bộ.
+        \item Dữ liệu từ sàn được "fan-out" (phân phối) đồng thời đến nhiều đích khác nhau mà không block luồng xử lý chính.
+    \end{itemize}
+
+    \item \textbf{Kafka Publisher (Integration)}:
+    \begin{itemize}
+        \item Dữ liệu giá sau khi được chuẩn hóa sẽ được đẩy vào Kafka topic (\texttt{market\_price\_updates}).
+        \item Điều này cho phép các service khác (như AI Service) tiêu thụ dữ liệu một cách độc lập (decoupled).
+    \end{itemize}
+
+    \item \textbf{Real-time Client Updates}:
+    \begin{itemize}
+        \item Market Service đồng thời đóng vai trò là WebSocket Server cho Frontend.
+        \item Client (Web/Mobile) kết nối đến Market Service để nhận update giá realtime.
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Cơ chế Ổn định và Tự phục hồi}
+
+Trong môi trường production, kết nối mạng không bao giờ ổn định 100\%. Market Service thực hiện các chiến lược sau để đảm bảo tính sẵn sàng:
+
+\begin{itemize}
+    \item \textbf{Automatic Reconnection}: Khi phát hiện kết nối đến sàn bị ngắt (thông qua error callback hoặc heartbeat timeout), service tự động thực hiện quy trình kết nối lại với chiến lược \textit{exponential backoff} (chờ thời gian tăng dần 1s, 2s, 4s... để tránh spam).
+    
+    \item \textbf{Graceful Degradation}: Nếu Kafka gặp sự cố tạm thời, luồng WebSocket cho Client vẫn hoạt động bình thường để đảm bảo trải nghiệm người dùng không bị gián đoạn hoàn toàn.
+    
+    \item \textbf{Data Consistency}: Dữ liệu luôn được lưu xuống database song song với việc broadcast, đảm bảo không có khoảng trống dữ liệu (data gaps) quá lớn khi hệ thống khởi động lại.
+\end{itemize}
+
+\subsection{Luồng dữ liệu trong thực tế}
+
+Điển hình một chu trình xử lý giá:
+
+\begin{enumerate}
+    \item \textbf{Sàn giao dịch}: Giá Bitcoin thay đổi từ 95,000 lên 95,005 USDT.
+    \item \textbf{WebSocket Ingestion}: Market Service nhận event update chỉ sau vài mili-giây.
+    \item \textbf{Processing}: Service parse JSON, chuẩn hóa định dạng (timestamp, open, high, low, close, volume).
+    \item \textbf{Distribution (Parallel)}:
+    \begin{itemize}
+        \item \textit{Luồng 1}: Gửi ngay lập tức xuống Frontend qua WebSocket $\to$ Biểu đồ user nhấp nháy cập nhật.
+        \item \textit{Luồng 2}: Đẩy vào Kafka $\to$ AI Service nhận được, kích hoạt tính toán dự đoán lại.
+        \item \textit{Luồng 3}: Lưu vào PostgreSQL/TimescaleDB $\to$ Phục vụ xem lại lịch sử sau này.
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Kết luận Tình huống 1}
+
+Việc chuyển đổi từ HTTP Polling sang WebSocket Architecture mang lại lợi ích kép:
+\begin{itemize}
+    \item \textbf{Hiệu năng}: Giảm độ trễ từ hàng giây xuống hàng mili-giây.
+    \item \textbf{Khả năng mở rộng (Scalability)}: Một instance Market Service có thể xử lý hàng nghìn stream dữ liệu mà không tốn tài nguyên tạo kết nối mới liên tục.
+\end{itemize}
+
+Giải pháp này tạo nền tảng vững chắc cho các tính năng cao cấp hơn như AI Prediction (cần dữ liệu realtime) và Trading Bot (cần phản ứng cực nhanh).
+

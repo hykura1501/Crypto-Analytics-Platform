@@ -1,0 +1,419 @@
+% =============================================================================
+% BẢO MẬT TRONG HỆ THỐNG MICROSERVICES
+% =============================================================================
+
+\section{Bảo mật trong Hệ thống Microservices}
+
+\begin{figure}[H]
+\centering
+\includegraphics[
+    width=0.9\textwidth,
+    height=0.92\textheight,
+    keepaspectratio
+]{sequence/sequence_auth_flow.png}
+
+\caption{Sequence Diagram: Authentication Flow với JWT + Refresh Token}
+\label{fig:seq-auth}
+\end{figure}
+
+\subsection{Bối cảnh và Động cơ}
+
+Trong giai đoạn mở rộng và scale-up hệ thống phân tích tài chính, nhóm phát triển phát hiện một loạt các truy cập bất thường đến các microservices nội bộ như \texttt{price-prediction-service} và \texttt{portfolio-backtest-service}. Phân tích chi tiết cho thấy:
+
+\textbf{Đặc điểm của các yêu cầu bất thường:}
+\begin{itemize}
+    \item \textit{Bypass API Gateway}: Các requests gọi trực tiếp đến internal services thay vì đi qua API Gateway layer
+    \item \textit{JWT còn hiệu lực}: Sử dụng Access Token hợp lệ nhưng đã được cấp từ lâu (cách đây 1 tuần hoặc hơn)
+    \item \textit{Client giả mạo}: Các yêu cầu đến từ các client không được xác thực hoặc đã bị compromise
+\end{itemize}
+
+\textbf{Hậu quả nghiêm trọng:}
+\begin{itemize}
+    \item \textit{Data Integrity Issues}: Một số chiến lược đầu tư được thực thi với dữ liệu giả mạo, dẫn đến kết quả phân tích sai lệch
+    \item \textit{Lack of Auditability}: Không có audit logs chi tiết cho quá trình authentication, không thể trace được nguồn gốc của các yêu cầu bất thường
+    \item \textit{Token Replay Attack}: Attackers thu thập và phát tán hàng loạt JWT giả mạo đến các backend services
+    \item \textit{Potential Financial Loss}: Nếu hệ thống được sử dụng cho giao dịch thực, có thể dẫn đến tổn thất tài chính
+\end{itemize}
+
+\subsection{Phân tích nguyên nhân và Vấn đề bảo mật}
+
+\noindent\textbf{Hạn chế của JWT đơn thuần (JWT Alone):}
+
+Mặc dù JSON Web Tokens (JWT) là phương pháp authentication phổ biến, việc chỉ sử dụng JWT alone có những hạn chế nghiêm trọng:
+
+\begin{enumerate}
+    \item \textbf{Không thể thu hồi JWT (Irrevocable Tokens)}:
+    \begin{itemize}
+        \item JWT được thiết kế stateless - sau khi cấp phát không thể thu hồi lại
+        \item Token vẫn hợp lệ cho đến khi hết hạn (có thể lên đến 1 tuần hoặc hơn)
+        \item Kẻ tấn công có thể sử dụng token đã đánh cắp trong suốt thời gian còn hiệu lực
+        \item Không có cơ chế để invalidate token ngay lập tức khi phát hiện compromise
+    \end{itemize}
+    
+    \item \textbf{Thiếu Single Source of Truth}:
+    \begin{itemize}
+        \item Mỗi microservice tự verify JWT độc lập mà không có coordination
+        \item Không có cơ chế tập trung để kiểm tra xem token có bị đánh cắp hay revoke chưa
+        \item Không tracking được active sessions của người dùng trên toàn hệ thống
+        \item Khó implement các tính năng như "logout from all devices"
+    \end{itemize}
+    
+    \item \textbf{Quản lý Secret Key phức tạp}:
+    \begin{itemize}
+        \item Tất cả services cần chia sẻ cùng một secret key để verify JWT signature
+        \item Nếu key bị lộ, toàn bộ hệ thống bị ảnh hưởng và cần rotate ngay
+        \item Key rotation trong môi trường production rất phức tạp và rủi ro cao
+        \item Cần mechanism để support multiple valid keys đồng thời trong quá trình transition
+    \end{itemize}
+\end{enumerate}
+
+\noindent\textbf{Attack Vectors được xác định:}
+
+Dựa trên phân tích, các vector tấn công sau đã được xác định:
+
+\begin{itemize}
+    \item \textbf{API Gateway Bypass}: Gọi trực tiếp vào internal services mà không đi qua API Gateway layer, bỏ qua các security checks như rate limiting và request validation
+    
+    \item \textbf{Token Replay Attack}: Sử dụng JWT còn hợp lệ nhưng đã cũ (có thể đã bị đánh cắp) để truy cập hệ thống
+    
+    \item \textbf{Lack of Audit Trail}: Không có logging đầy đủ cho authentication events, khó forensics khi có incident
+    
+    \item \textbf{JWT Flooding}: Phát tán hàng loạt JWT (có thể giả mạo hoặc đánh cắp) đến các backend services để gây overload
+\end{itemize}
+
+\subsection{Giải pháp: Auth Service}
+
+\begin{figure}[H]
+\centering
+\includegraphics[
+  width=0.9\textwidth,
+  height=0.92\textheight,
+  keepaspectratio
+]{sequence/sequence_auth_flow.png}\caption{Sequence Diagram: Authentication Flow với JWT + Refresh Token}
+\label{fig:seq-auth}
+\end{figure}
+
+Sơ đồ \ref{fig:seq-auth} minh họa luồng authentication hoàn chỉnh bao gồm login, token refresh rotation, và logout với token blacklist.
+
+\noindent\textbf{Kiến trúc Auth Service (Golang):}
+
+Auth Service được triển khai riêng biệt với các tính năng:
+\begin{itemize}
+    \item JWT Access Token (short-lived) + Refresh Token (long-lived)
+    \item Password hashing với bcrypt
+    \item Refresh Token lưu trong database để có thể revoke
+    \item Clean Architecture với Repository pattern
+\end{itemize}
+
+% (Đoạn code chi tiết AuthService interface và implementation đã được lược bỏ khỏi báo cáo theo yêu cầu.)
+
+\noindent\textbf{Token Generation and Management:}
+
+Hệ thống sử dụng mô hình ``access token ngắn hạn + refresh token dài hạn'' để cân bằng giữa trải nghiệm người dùng và tính an toàn:
+\begin{itemize}
+    \item \textbf{Access Token (JWT, short-lived)}:
+    \begin{itemize}
+        \item Được phát hành khi \texttt{/auth/login} thành công hoặc sau khi refresh token hợp lệ
+        \item Chứa các claims tối thiểu: \texttt{sub/user\_id}, \texttt{email}, \texttt{role}, \texttt{iat}, \texttt{exp} (và có thể thêm \texttt{jti} để trace)
+        \item Thời hạn ngắn (ví dụ 15--30 phút) để giảm rủi ro khi token bị lộ
+        \item Được ký bằng secret/key của hệ thống; backend chỉ cần verify chữ ký + hạn dùng, không cần lưu state
+    \end{itemize}
+
+    \item \textbf{Refresh Token (opaque, long-lived)}:
+    \begin{itemize}
+        \item Là chuỗi ngẫu nhiên (opaque token), không tự chứa thông tin nhạy cảm
+        \item Được lưu trong bảng \texttt{refresh\_tokens} (gắn với \texttt{user\_id} và \texttt{expires\_at}) để hỗ trợ revoke/rotation
+        \item Thời hạn dài hơn (vài ngày đến vài tuần) và chỉ dùng để lấy access token mới
+    \end{itemize}
+
+    \item \textbf{Quản lý trên client}:
+    \begin{itemize}
+        \item Token nên được set qua cookie với thuộc tính \texttt{HttpOnly}, \texttt{Secure}, \texttt{SameSite} để hạn chế XSS/CSRF
+        \item Frontend chỉ cần dựa trên trạng thái đăng nhập và thông tin user (qua \texttt{/auth/me}) để hiển thị đúng quyền
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{Refresh Token Flow:}
+
+Luồng refresh token được thiết kế theo hướng ``rotation'' (mỗi lần refresh sẽ cấp refresh token mới), nhằm giảm rủi ro replay:
+\begin{enumerate}
+    \item \textbf{Trigger}: Khi access token hết hạn (HTTP 401), client gọi \texttt{/auth/refresh} kèm refresh token (thường ở cookie).
+    \item \textbf{Validate}: Auth Service kiểm tra refresh token:
+    \begin{itemize}
+        \item Token có tồn tại trong database hay không
+        \item Token còn hạn (\texttt{expires\_at})
+        \item Token thuộc đúng user và chưa bị revoke
+    \end{itemize}
+    \item \textbf{Rotate}: Nếu hợp lệ, hệ thống:
+    \begin{itemize}
+        \item Phát hành access token mới
+        \item Tạo refresh token mới và lưu lại (đồng thời vô hiệu hóa refresh token cũ)
+    \end{itemize}
+    \item \textbf{Response}: Trả về token mới (hoặc set lại cookies) để client tiếp tục gọi API mà không cần đăng nhập lại.
+    \item \textbf{Logout / Revoke}: Khi user logout, refresh token hiện tại bị xóa/vô hiệu hóa trong database, đồng thời client được yêu cầu xóa cookies.
+\end{enumerate}
+
+\noindent\textbf{Lưu ý bảo mật}: Có thể bổ sung rate limiting cho \texttt{/auth/refresh}, logging theo \texttt{user\_id}, và cơ chế phát hiện ``token reuse'' để revoke toàn bộ session của user khi có dấu hiệu bị đánh cắp.
+
+\subsection{Zero-Trust Architecture}
+
+\noindent\textbf{Nguyên tắc Zero-Trust:}
+
+\begin{enumerate}
+    \item \textbf{Never Trust, Always Verify}:
+    \begin{itemize}
+        \item Không tin tưởng request từ internal network
+        \item Mọi request phải được authenticate
+        \item Verify cả source IP và token
+    \end{itemize}
+    
+    \item \textbf{Least Privilege Access}:
+    \begin{itemize}
+        \item Service chỉ được access resources cần thiết
+        \item Role-based access control (RBAC)
+        \item Scope-based JWT claims
+    \end{itemize}
+    
+    \item \textbf{Micro-segmentation}:
+    \begin{itemize}
+        \item Network policies trong Kubernetes
+        \item Service-to-service authentication (mTLS)
+        \item API Gateway làm single entry point
+    \end{itemize}
+\end{enumerate}
+
+\noindent\textbf{Service Mesh với mTLS:}
+
+% (Đoạn YAML NetworkPolicy minh họa đã được lược bỏ khỏi báo cáo theo yêu cầu.)
+
+\subsection{API Gateway Security}
+
+\noindent\textbf{Vai trò của API Gateway:}
+
+\begin{enumerate}
+    \item \textbf{Single Entry Point}: Tất cả external traffic qua Gateway
+    \item \textbf{Authentication/Authorization}: Verify tokens trước khi forward
+    \item \textbf{Rate Limiting}: Ngăn chặn DDoS và brute force
+    \item \textbf{Request Validation}: Validate input trước khi đến services
+    \item \textbf{Audit Logging}: Ghi log tất cả requests
+\end{enumerate}
+
+\noindent\textbf{Xử lý khi Attacker bypass Gateway:}
+
+% (Đoạn code InternalAuthMiddleware đã được lược bỏ khỏi báo cáo theo yêu cầu.)
+
+\subsection{Kiến trúc Bảo mật đề xuất}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm,
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.7cm, align=center, font=\small}
+]
+
+% Client
+\node[box, fill=green!30] (client) {Client};
+
+% API Gateway
+\node[box, fill=orange!30, below=1.5cm of client] (gateway) {API Gateway\\Rate Limit + Auth};
+
+% Auth Service
+\node[box, fill=yellow!30, right=2cm of gateway] (auth) {Auth Service\\OAuth2 + JWT};
+
+% Redis
+\node[box, fill=red!30, below=1.2cm of auth] (redis) {Redis\\Token Store};
+
+% Internal Services
+\node[box, fill=blue!20, below left=2cm and 0cm of gateway] (svc1) {Price Service};
+\node[box, fill=blue!20, right=0.3cm of svc1] (svc2) {AI Service};
+\node[box, fill=blue!20, right=0.3cm of svc2] (svc3) {Crawler};
+
+% Database
+\node[box, fill=gray!30, below=1.5cm of svc2] (db) {PostgreSQL};
+
+% Arrows
+\draw[->] (client) -- node[right]{\tiny HTTPS} (gateway);
+\draw[<->] (gateway) -- node[above]{\tiny Verify} (auth);
+\draw[<->] (auth) -- (redis);
+\draw[->] (gateway) -- (svc1);
+\draw[->] (gateway) -- (svc2);
+\draw[->] (gateway) -- (svc3);
+\draw[->] (svc1) -- (db);
+\draw[->] (svc2) -- (db);
+\draw[->] (svc3) -- (db);
+
+% Network boundary
+\draw[dashed, thick] (-2.5,-2.5) rectangle (5,-6.5);
+\node at (-1,-2.8) {\tiny Internal Network};
+
+\end{tikzpicture}
+\caption{Kiến trúc Bảo mật Microservices}
+\end{figure}
+
+\subsection{Kết luận Tình huống 3}
+
+\textbf{Bài học rút ra về kiến trúc bảo mật:}
+
+\begin{enumerate}
+    \item \textbf{Defense in Depth}: Nhiều lớp bảo mật, không phụ thuộc vào một mechanism
+    
+    \item \textbf{Token Lifecycle Management}:
+    \begin{itemize}
+        \item Access token ngắn hạn (15-30 phút)
+        \item Refresh token có thể revoke
+        \item Blacklist cho compromised tokens
+    \end{itemize}
+    
+    \item \textbf{Zero-Trust giữa Services}:
+    \begin{itemize}
+        \item mTLS cho service-to-service communication
+        \item Internal tokens cho authorization
+        \item Network policies hạn chế access
+    \end{itemize}
+    
+    \item \textbf{API Gateway là bắt buộc}:
+    \begin{itemize}
+        \item Single entry point
+        \item Centralized authentication
+        \item Audit logging
+    \end{itemize}
+    
+    \item \textbf{Monitoring và Alerting}:
+    \begin{itemize}
+        \item Log tất cả authentication attempts
+        \item Alert cho suspicious patterns
+        \item Regular security audits
+    \end{itemize}
+\end{enumerate}
+
+% ==============================================================================
+% PHẦN BỔ SUNG: QUẢN LÝ TÀI KHOẢN VIP
+% ==============================================================================
+\subsection{Quản lý Tài khoản Thường/VIP}
+
+\noindent\textbf{Yêu cầu phân quyền:}
+
+\begin{table}[H]
+\centering
+\caption{Phân quyền tài khoản theo loại}
+\begin{tabular}{|p{4cm}|c|c|}
+\hline
+\textbf{Tính năng} & \textbf{Thường} & \textbf{VIP} \\
+\hline
+Xem biểu đồ giá realtime & \checkmark & \checkmark \\
+\hline
+Chọn cặp tiền (BTCUSDT, ETHUSDT...) & \checkmark & \checkmark \\
+\hline
+Xem đa khung thời gian & \checkmark & \checkmark \\
+\hline
+Xem danh sách tin tức & \checkmark & \checkmark \\
+\hline
+Xem AI Sentiment Analysis & $\times$ & \checkmark \\
+\hline
+Xem AI Price Prediction & $\times$ & \checkmark \\
+\hline
+Xem SHAP Explanation (XAI) & $\times$ & \checkmark \\
+\hline
+Xem Top News với Keywords & $\times$ & \checkmark \\
+\hline
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Extended User Model Proposal:}
+
+Để hỗ trợ phân quyền VIP, mô hình User cần được mở rộng với các trường sau:
+\begin{itemize}
+    \item \textbf{Role}: Enum hoặc string field lưu trữ loại tài khoản (\texttt{"free"} hoặc \texttt{"vip"}), mặc định là \texttt{"free"} khi đăng ký
+    \item \textbf{VIPExpiresAt}: Timestamp nullable để quản lý thời hạn VIP (nếu có subscription model)
+    \item \textbf{VIPActivatedAt}: Timestamp ghi nhận thời điểm kích hoạt VIP
+\end{itemize}
+
+Cấu trúc này cho phép:
+\begin{itemize}
+    \item Phân biệt rõ ràng giữa tài khoản thường và VIP trong database
+    \item Hỗ trợ subscription model với thời hạn VIP
+    \item Dễ dàng mở rộng thêm các tier khác (Premium, Enterprise) trong tương lai
+    \item JWT claims có thể embed role để giảm database queries
+\end{itemize}
+
+\noindent\textbf{Middleware kiểm tra Role:}
+
+Middleware \texttt{RequireVIP} được triển khai như một layer bảo vệ bổ sung sau \texttt{AuthMiddleware}:
+\begin{itemize}
+    \item \textbf{Điều kiện tiên quyết}: Request phải đã pass qua \texttt{AuthMiddleware} để có user context trong Gin context
+    \item \textbf{Logic kiểm tra}: 
+    \begin{itemize}
+        \item Lấy user ID từ context (đã được set bởi \texttt{AuthMiddleware})
+        \item Query database để lấy thông tin user và kiểm tra field \texttt{Role}
+        \item Nếu role không phải \texttt{"vip"}, trả về HTTP 403 Forbidden với message phù hợp
+        \item Nếu là VIP, cho phép request tiếp tục đến handler
+    \end{itemize}
+    \item \textbf{Áp dụng}: Middleware này được gắn vào các route group cần VIP như \texttt{/api/v1/ai/predict}, \texttt{/api/v1/ai/sentiment}, \texttt{/api/v1/news/top-keywords}
+    \item \textbf{Tối ưu hóa}: Có thể cache role trong JWT claims để tránh database query mỗi request, nhưng cần cơ chế refresh khi role thay đổi
+\end{itemize}
+
+\noindent\textbf{Frontend Protected Route:}
+
+Component \texttt{VIPRoute} được xây dựng tương tự \texttt{ProtectedRoute} nhưng có thêm logic kiểm tra role:
+\begin{itemize}
+    \item \textbf{Kiểm tra Authentication}: Đầu tiên verify user đã đăng nhập (có access token trong cookies)
+    \item \textbf{Kiểm tra Role}: Gọi API \texttt{GET /auth/me} để lấy thông tin user hiện tại, bao gồm role
+    \item \textbf{Xử lý kết quả}:
+    \begin{itemize}
+        \item Nếu chưa đăng nhập: Redirect về \texttt{/login}
+        \item Nếu đã đăng nhập nhưng không phải VIP: Redirect về \texttt{/dashboard} với thông báo yêu cầu nâng cấp
+        \item Nếu là VIP: Render children component (ví dụ: trang Prediction với đầy đủ tính năng)
+    \end{itemize}
+    \item \textbf{Loading State}: Hiển thị loading spinner trong quá trình kiểm tra để tránh flash content không mong muốn
+    \item \textbf{Caching}: Có thể cache role trong React context hoặc localStorage để giảm API calls, nhưng cần invalidate khi logout hoặc khi role thay đổi
+\end{itemize}
+
+\noindent\textbf{Conditional Rendering trong Dashboard:}
+
+Trong component \texttt{Dashboard}, các phần tử UI được render có điều kiện dựa trên role của user:
+\begin{itemize}
+    \item \textbf{AI Prediction Panel}: 
+    \begin{itemize}
+        \item Tài khoản thường: Hiển thị placeholder với message "Upgrade to VIP to access AI predictions" và button "Upgrade Now"
+        \item Tài khoản VIP: Hiển thị đầy đủ \texttt{PredictionPanel} component với các tính năng prediction, SHAP explanation, top news articles
+    \end{itemize}
+    \item \textbf{News Sidebar}:
+    \begin{itemize}
+        \item Tài khoản thường: Chỉ hiển thị danh sách tin tức cơ bản (title, source, time)
+        \item Tài khoản VIP: Hiển thị thêm sentiment score với color coding, keywords extraction, và filter theo sentiment
+    \end{itemize}
+    \item \textbf{Chart Features}:
+    \begin{itemize}
+        \item Tài khoản thường: Chỉ có các tính năng chart cơ bản
+        \item Tài khoản VIP: Hiển thị thêm markers cho news events với sentiment overlay, và technical indicators từ AI analysis
+    \end{itemize}
+    \item \textbf{Implementation}: Sử dụng React conditional rendering (\texttt{\{userRole === 'vip' \&\& <Component />\}}) hoặc ternary operator để toggle visibility
+\end{itemize}
+
+\noindent\textbf{API Response dựa trên Role:}
+
+Backend services điều chỉnh response dựa trên role của user được extract từ JWT:
+\begin{itemize}
+    \item \textbf{AI Service}:
+    \begin{itemize}
+        \item Tài khoản thường: Trả về HTTP 403 khi gọi \texttt{/ai/predict} hoặc \texttt{/ai/sentiment}
+        \item Tài khoản VIP: Trả về đầy đủ prediction result với SHAP explanation, feature importance, top news articles
+    \end{itemize}
+    \item \textbf{News Service}:
+    \begin{itemize}
+        \item Tài khoản thường: Response chỉ chứa basic fields (id, title, url, published\_at, source)
+        \item Tài khoản VIP: Response bao gồm thêm sentiment\_score, keywords, summary, và top\_keywords endpoint
+    \end{itemize}
+    \item \textbf{Market Service}:
+    \begin{itemize}
+        \item Cả hai loại tài khoản đều có quyền truy cập market data (giá, lịch sử)
+        \item Tài khoản VIP có thể nhận thêm technical indicators được tính toán bởi AI
+    \end{itemize}
+    \item \textbf{Implementation Pattern}: 
+    \begin{itemize}
+        \item Middleware extract role từ JWT claims (đã được validate bởi Auth Service)
+        \item Handler kiểm tra role và điều chỉnh query hoặc response payload
+        \item Sử dụng database views hoặc query filters để tự động loại bỏ fields không được phép
+        \item Response structure nhất quán nhưng fields được filter dựa trên permissions
+    \end{itemize}
+\end{itemize}

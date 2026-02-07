@@ -1,0 +1,860 @@
+% =============================================================================
+% QUÁ TRÌNH SCALE-UP KIẾN TRÚC HỆ THỐNG
+% =============================================================================
+
+\section{Quá trình Scale-up Kiến trúc Hệ thống}
+
+Trong quá trình phát triển hệ thống Crypto Analytics Platform, kiến trúc được thiết kế theo nguyên tắc \textbf{progressive scaling} - bắt đầu từ đơn giản và mở rộng dần theo nhu cầu thực tế. Chương này trình bày quá trình evolution qua 5 phiên bản kiến trúc, từ monolith đơn giản đến microservices phân tán, với \textbf{Version 4 là implementation hiện tại} của dự án.
+
+\subsection{Tổng quan về Scaling}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{sequence/sequence_microservices_flow.png}
+\caption{Sequence Diagram: Microservices Communication qua Kafka}
+\label{fig:seq-microservices}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Evolution các phiên bản kiến trúc}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{|c|l|c|l|l|}
+\hline
+\textbf{Ver} & \textbf{Tên gọi} & \textbf{Users} & \textbf{Đặc điểm chính} & \textbf{Bottleneck chính} \\
+\hline
+V1 & Single Box & 10-100 & Monolith trên 1 server & CPU/Memory contention \\
+\hline
+V2 & Separated Data & 100-1K & Tách Database + Storage & Single app server \\
+\hline
+V3 & Horizontal Scale & 1K-10K & Load Balancer + Workers & Monolithic codebase \\
+\hline
+\rowcolor{yellow!30}
+V4 & Microservices & 10K-100K & \textbf{4 services + Kafka (Hiện tại)} & Cost \& Complexity \\
+\hline
+V5 & Cloud Native & 100K-1M+ & Auto-scaling + Analytics & Operational overhead \\
+\hline
+\end{tabular}
+}
+\end{table}
+
+\textbf{Lưu ý}: Dự án hiện tại triển khai \textbf{Version 4} với Docker Compose orchestration, phù hợp cho quy mô đồ án và demo production-ready. Các version khác là đề xuất lý thuyết cho các giai đoạn scaling khác nhau.
+
+% =============================================================================
+\subsection{Version 1: Single Box Monolith}
+% =============================================================================
+
+\noindent\textbf{Bối cảnh và Giả định:}
+
+\begin{itemize}
+    \item \textbf{Số lượng user}: Vài chục đến vài trăm người dùng
+    \item \textbf{Mục tiêu}: Chạy demo ổn định, chưa cần high availability
+    \item \textbf{Độ trễ}: Chấp nhận được ở mức cơ bản
+    \item \textbf{Phù hợp}: Giai đoạn phát triển đồ án, MVP, Proof of Concept
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{arch/ver1.png}
+\caption{Kiến trúc Version 1: Single Box Monolith}
+\label{fig:arch-v1}
+\end{figure}
+
+\noindent\textbf{Thành phần Kiến trúc:}
+
+Toàn bộ hệ thống chạy trên \textbf{1 server duy nhất} (VPS hoặc local machine):
+
+\noindent\textbf{Web Server + Ứng dụng Monolith:}
+
+\begin{itemize}
+    \item \textbf{REST API + WebSocket Server}:
+    \begin{itemize}
+        \item Lấy giá từ Binance API (REST) để build lịch sử
+        \item Mở WebSocket đến Binance để nhận giá realtime và forward ra cho client
+    \end{itemize}
+    
+    \item \textbf{Crawler tin tức}:
+    \begin{itemize}
+        \item Cron job/Background task (Celery/RQ hoặc đơn giản là cron + script)
+        \item Gọi HTTP đến nhiều trang báo, parse HTML
+        \item Trích xuất: Tiêu đề, timestamp, nguồn, link, nội dung, sentiment
+        \item Lưu raw HTML + thông tin đã trích xuất
+    \end{itemize}
+    
+    \item \textbf{Service AI}:
+    \begin{itemize}
+        \item Gọi model AI từ local (file .pt, .h5) hoặc API ngoài
+        \item Align tin tức với giá lịch sử để tạo feature
+    \end{itemize}
+    
+    \item \textbf{Module Account}:
+    \begin{itemize}
+        \item Đăng ký/Đăng nhập
+        \item Profile user, watchlist cặp tiền
+        \item Lưu config GUI (layout chart, khung thời gian yêu thích)
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{Database và Storage:}
+
+\begin{itemize}
+    \item \textbf{PostgreSQL/MySQL} cài trên cùng máy:
+    \begin{itemize}
+        \item Bảng: users, news, prices, signals, logs
+    \end{itemize}
+    \item \textbf{Local Disk Storage}:
+    \begin{itemize}
+        \item Raw HTML, file model AI, logs
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{Phân tích Trade-offs:}
+
+\begin{table}[H]
+\centering
+\caption{Ưu nhược điểm Version 1}
+\begin{tabular}{|p{6.5cm}|p{6.5cm}|}
+\hline
+\textbf{Ưu điểm} & \textbf{Nhược điểm} \\
+\hline
+\textit{Đơn giản}: Một codebase, một deployment, dễ code và debug & \textit{Không scale ngang}: Chỉ có thể tăng CPU/RAM (vertical scaling) \\
+\hline
+\textit{Chi phí thấp}: Chỉ cần 1 server (\$10-50/tháng) & \textit{Single Point of Failure}: Server chết = toàn hệ thống chết \\
+\hline
+\textit{Low latency}: Không có network hop giữa components & \textit{Resource contention}: DB, crawler, AI cạnh tranh CPU/memory \\
+\hline
+\textit{Phù hợp MVP}: Tốt cho prototyping và proof of concept & \textit{Deployment risk}: Deploy = restart toàn bộ hệ thống \\
+\hline
+\textit{No network complexity}: Không cần lo service discovery, load balancing & \textit{Technology lock-in}: Tất cả phải dùng cùng tech stack \\
+\hline
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Đánh giá Version 1:}
+
+Đây là điểm xuất phát - không có version trước để so sánh. Phù hợp cho:
+\begin{itemize}
+    \item Giai đoạn development ban đầu
+    \item Demo cho stakeholders
+    \item Validate business logic trước khi invest vào infrastructure
+\end{itemize}
+
+% =============================================================================
+\subsection{Version 2: Separated Data Layer}
+% =============================================================================
+
+\noindent\textbf{Trigger để Scale:}
+
+Khi số lượng user tăng (vài ngàn), crawler lấy tin từ nhiều nguồn hơn, dữ liệu tin tức và giá lịch sử tăng rất nhanh, cần tách database và storage ra khỏi application server.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{arch/ver2.png}
+\caption{Kiến trúc Version 2: Tách Database và Object Storage}
+\label{fig:arch-v2}
+\end{figure}
+
+\noindent\textbf{Thay đổi Kiến trúc}:
+
+\begin{itemize}
+    \item \textbf{Application Server}: Chạy monolith như cũ (1 server)
+    \begin{itemize}
+        \item Web + API + WebSocket + Crawler + AI (vẫn là 1 codebase)
+        \item Không còn chạy database locally
+    \end{itemize}
+    
+    \item \textbf{Managed Database} (PostgreSQL/MySQL as a service):
+    \begin{itemize}
+        \item Tách DB ra thành server riêng (managed service hoặc dedicated server)
+        \item Tables: users, articles, market\_prices, predictions
+        \item Scale độc lập: tăng RAM, IOPS, storage
+        \item Automated backups, replication
+    \end{itemize}
+    
+    \item \textbf{Object Storage} (S3-compatible hoặc MinIO):
+    \begin{itemize}
+        \item Lưu raw HTML của news (để re-parse khi site đổi cấu trúc)
+        \item AI model files (.pt, .h5, checkpoints)
+        \item Log files lớn, database backups
+        \item Giá rẻ cho cold storage
+    \end{itemize}
+    
+    \item \textbf{Network \& Security}:
+    \begin{itemize}
+        \item Database ở private network, chỉ app server connect được
+        \item Firewall rules: chỉ mở port 80/443 ra internet
+        \item Credentials management: environment variables, không hardcode
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{Ưu nhược điểm Version 2:}
+
+\begin{table}[H]
+\centering
+\caption{Phân tích Version 2}
+\begin{tabular}{|p{6.5cm}|p{6.5cm}|}
+\hline
+\textbf{Ưu điểm} & \textbf{Nhược điểm} \\
+\hline
+\textit{Separation of concerns}: Data layer tách riêng & \textit{Vẫn single app server}: Không scale ngang được \\
+\hline
+\textit{Independent scaling}: DB scale riêng không ảnh hưởng app & \textit{Network latency}: Thêm network hop app ↔ DB \\
+\hline
+\textit{Managed backups}: DB service tự động backup & \textit{Cost tăng}: Phải trả cho DB service + storage \\
+\hline
+\textit{Storage flexibility}: Object storage handle TB data dễ dàng & \textit{Complexity tăng}: Phải quản lý 3 components thay vì 1 \\
+\hline
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Cải thiện so với Version 1:}
+
+\begin{itemize}
+    \item \textbf{Giải quyết vấn đề}: Full disk do lưu nhiều news/prices
+    \item \textbf{Giảm load}: App server không còn phải lo về database I/O
+    \item \textbf{Reliability}: DB có backup tự động, app crash không mất data
+    \item \textbf{Hạn chế còn lại}: Vẫn chỉ 1 app server → nghẽn khi có nhiều WebSocket connections
+\end{itemize}
+
+% =============================================================================
+\subsection{Version 3: Horizontal Scaling}
+% =============================================================================
+
+\noindent\textbf{Trigger để Scale:}
+
+\begin{itemize}
+    \item Hàng chục nghìn user
+    \item Biểu đồ realtime cho nhiều cặp tiền, đa khung thời gian
+    \item Crawler tin từ nhiều site, AI phân tích nặng hơn
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{arch/ver3.png}
+\caption{Kiến trúc Version 3: Horizontal Scaling với Load Balancer và Workers}
+\label{fig:arch-v3}
+\end{figure}
+
+\noindent\textbf{Thay đổi Kiến trúc}:
+
+\subsubsection{Load Balancer}
+Reverse proxy (Nginx/HAProxy) hoặc Load Balancer service:
+\begin{itemize}
+    \item Nhận HTTP/HTTPS + WebSocket từ clients
+    \item Phân phối traffic đến multiple app servers (round-robin, least-conn)
+    \item Health checks: tự động remove unhealthy instances
+    \item SSL termination tại load balancer layer
+\end{itemize}
+
+\noindent\textbf{Multiple App Servers:}
+3-5 application servers chạy cùng monolith code:
+\begin{itemize}
+    \item API endpoints (REST) cho GUI
+    \item WebSocket servers để push realtime data
+    \item Session management: stateless với JWT hoặc Redis session store
+    \item \textbf{Không} chạy background jobs (crawler, AI) để tránh block main traffic
+\end{itemize}
+
+\noindent\textbf{Background Workers:}
+Dedicated worker servers (pool riêng):
+\begin{itemize}
+    \item \textbf{Crawler Workers}:
+    \begin{itemize}
+        \item Poll message queue để nhận crawl jobs
+        \item Execute HTTP requests, parse HTML
+        \item Store results vào DB + object storage
+    \end{itemize}
+    \item \textbf{AI Workers}:
+    \begin{itemize}
+        \item Process sentiment analysis jobs
+        \item Train/inference prediction models
+        \item CPU/GPU intensive tasks
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{Message Queue:}
+RabbitMQ, Redis Queue, hoặc Kafka:
+\begin{itemize}
+    \item \textbf{Queues}: crawl\_jobs, ai\_analysis\_jobs, notification\_jobs
+    \item \textbf{Pattern}: Producer (app servers) → Queue → Consumers (workers)
+    \item \textbf{Benefits}: Async processing, backpressure handling, retry logic
+\end{itemize}
+
+\noindent\textbf{Database với Read Replicas:}
+\begin{itemize}
+    \item \textbf{Primary}: Handle writes (INSERT, UPDATE, DELETE)
+    \item \textbf{Replicas} (1-2): Handle reads (SELECT queries cho news list, prices)
+    \item Application router: write → primary, read → replicas
+\end{itemize}
+
+\textbf{Cache Layer}:
+Redis cluster cho caching:
+\begin{itemize}
+    \item Current prices của các crypto pairs
+    \item Top/trending news (last 24h)
+    \item User sessions, JWT blacklist
+    \item Cache-aside pattern: check cache → miss → query DB → update cache
+\end{itemize}
+
+\noindent\textbf{Ưu nhược điểm Version 3:}
+
+\begin{table}[H]
+\centering
+\caption{Phân tích Version 3}
+\begin{tabular}{|p{6.5cm}|p{6.5cm}|}
+\hline
+\textbf{Ưu điểm} & \textbf{Nhược điểm} \\
+\hline
+\textit{Horizontal scaling}: Có thể thêm app servers khi cần & \textit{Monolith complexity}: Codebase lớn khó maintain \\
+\hline
+\textit{High availability}: 1 server chết, còn nhiều server khác & \textit{Deploy risk}: Deploy vẫn ảnh hưởng toàn bộ app \\
+\hline
+\textit{Background jobs isolated}: Không block main traffic & \textit{Shared database}: Vẫn là bottleneck khi scale \\
+\hline
+\textit{Cache improves performance}: Giảm DB load đáng kể & \textit{Complexity tăng}: Nhiều components hơn để quản lý \\
+\hline
+\textit{Async processing}: Queue handle spike traffic tốt & \textit{Cost}: Multiple servers + load balancer + cache \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Cải thiện so với Version 2}:
+
+\begin{itemize}
+    \item \textbf{Giải quyết vấn đề}: Single app server bottleneck
+    \item \textbf{Scale capability}: Thêm servers dễ dàng khi traffic tăng
+    \item \textbf{Reliability}: Failure của 1 server không làm hệ thống chết
+    \item \textbf{Performance}: Cache + read replicas giảm database load
+    \item \textbf{Hạn chế còn lại}: Monolithic codebase khó maintain, deploy risk cao
+\end{itemize}
+
+% =============================================================================
+\subsection{Version 4: Microservices Event-Driven (Triển khai hiện tại)}
+% =============================================================================
+
+\textbf{Lưu ý quan trọng}: Đây là version được triển khai thực tế trong dự án, với source code đầy đủ tại \texttt{docker-compose.yml} và các service directories.
+
+Sơ đồ \ref{fig:seq-microservices} ở phần đầu chương minh họa cách các microservices tương tác với nhau thông qua Kafka message broker và API Gateway.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{arch/ver4.png}
+\caption{Kiến trúc Version 4: Microservices với Kafka Event-Driven (Implementation hiện tại)}
+\label{fig:arch-v4}
+\end{figure}
+
+\noindent\textbf{Trigger để Scale:}
+
+Các vấn đề của Version 3 đòi hỏi chuyển sang microservices:
+
+\begin{itemize}
+    \item \textbf{Monolith too complex}: Codebase lớn, nhiều developers conflict khi merge code
+    \item \textbf{Tight coupling}: Thay đổi 1 phần ảnh hưởng toàn bộ hệ thống
+    \item \textbf{Deploy risk}: Mỗi lần deploy phải restart toàn bộ application
+    \item \textbf{Technology constraints}: Tất cả phải dùng cùng language/framework
+    \item \textbf{Independent scaling}: Không thể scale riêng crawler service hoặc AI service
+\end{itemize}
+
+\noindent\textbf{Kiến trúc Microservices Implementation:}
+
+\noindent\textbf{API Gateway - Traefik:}
+Entry point duy nhất cho tất cả client requests (file: \texttt{docker-compose.yml}):
+
+\begin{itemize}
+    \item \textbf{Routing rules}:
+    \begin{itemize}
+        \item \texttt{/api/v1/auth/*} → Auth Service (port 8081)
+        \item \texttt{/api/v1/market/*} → Market Service (port 8082)
+        \item \texttt{/ws/*} → Market Service WebSocket
+        \item \texttt{/api/v1/news/*} → Crawler Service (port 8083)
+        \item \texttt{/api/v1/ai/*} → AI Service (port 9001)
+    \end{itemize}
+    
+    \item \textbf{Features}:
+    \begin{itemize}
+        \item CORS handling cho frontend (localhost:5173)
+        \item Health checks cho từng service
+        \item Load balancing (nếu có multiple instances)
+        \item Dashboard UI tại port 8080
+    \end{itemize}
+\end{itemize}
+
+\textbf{Auth Service (Golang + Gin)}:
+Source: \texttt{services/auth-service/}
+
+\begin{itemize}
+    \item \textbf{Responsibilities}:
+    \begin{itemize}
+        \item User registration/login với bcrypt password hashing
+        \item JWT Access Token (short-lived, 15 phút) + Refresh Token (long-lived, 7 ngày)
+        \item Token rotation: invalidate old refresh token khi tạo mới
+        \item Role-based access (Free/VIP users)
+    \end{itemize}
+    
+    \item \textbf{Tech stack}: Golang, Gin framework, GORM, PostgreSQL, Redis
+    \item \textbf{Dependencies}: PostgreSQL (users, refresh\_tokens), Redis (token blacklist)
+\end{itemize}
+
+\noindent\textbf{Market Service (Golang + WebSocket):}
+Source: \texttt{services/market-service/}
+
+\begin{itemize}
+    \item \textbf{Responsibilities}:
+    \begin{itemize}
+        \item Connect đến Binance WebSocket API, duy trì persistent connection
+        \item Implement WebSocket Hub Pattern: manage 1000+ concurrent clients
+        \item Topic-based subscription: clients subscribe theo symbol (BTCUSDT, ETHUSDT)
+        \item Store historical prices vào PostgreSQL
+    \end{itemize}
+    
+    \item \textbf{Key patterns}:
+    \begin{itemize}
+        \item Hub Pattern: central hub manage all client connections
+        \item Go channels cho async message passing
+        \item Graceful shutdown handling
+    \end{itemize}
+    
+    \item \textbf{Tech stack}: Golang, Gin, gorilla/websocket, PostgreSQL
+\end{itemize}
+
+\noindent\textbf{Crawler Service (Golang + Colly):}
+Source: \texttt{services/crawler-service/}
+
+\begin{itemize}
+    \item \textbf{Responsibilities}:
+    \begin{itemize}
+        \item RSS feed parsing với gofeed library
+        \item HTML crawling với Colly framework
+        \item Concurrent crawling nhiều sources (CoinDesk, CoinTelegraph, VNExpress)
+        \item Produce Kafka messages cho AI Service
+    \end{itemize}
+    
+    \item \textbf{Kafka topics produced}:
+    \begin{itemize}
+        \item \texttt{news\_new\_article}: Raw article data
+        \item \texttt{news\_analyze\_css\_selector}: Request Gemini AI phân tích HTML structure
+    \end{itemize}
+    
+    \item \textbf{Tech stack}: Golang, Colly, gofeed, Kafka producer, PostgreSQL
+\end{itemize}
+
+\noindent\textbf{AI Service (Python + FinBERT):}
+Source: \texttt{services/ai-service-python/}
+
+\begin{itemize}
+    \item \textbf{Responsibilities}:
+    \begin{itemize}
+        \item Consume Kafka messages từ Crawler Service
+        \item Sentiment analysis: FinBERT (English), PhoBERT (Vietnamese)
+        \item Price prediction: XGBoost với technical indicators + news features
+        \item Explainable AI: SHAP values cho feature importance
+        \item Gemini AI integration: auto-learn CSS selectors
+    \end{itemize}
+    
+    \item \textbf{Models}:
+    \begin{itemize}
+        \item FinBERT: yiyanghkust/finbert-tone
+        \item PhoBERT: wonrax/phobert-base-vietnamese-sentiment
+        \item XGBoost: custom trained cho price prediction
+    \end{itemize}
+    
+    \item \textbf{Tech stack}: Python, Flask, Transformers, XGBoost, SHAP, Kafka consumer
+\end{itemize}
+
+\textbf{Message Broker - Apache Kafka}:
+\begin{itemize}
+    \item \textbf{Deployment}: KRaft mode (không cần Zookeeper), single broker
+    \item \textbf{Topics}:
+    \begin{itemize}
+        \item \texttt{news\_new\_article}: Crawler → AI (mỗi bài báo mới)
+        \item \texttt{news\_analyze\_css\_selector}: Crawler → AI (học HTML structure)
+        \item \texttt{news\_analyze\_rss\_structure}: Metadata về RSS feeds
+    \end{itemize}
+    
+    \item \textbf{Benefits}:
+    \begin{itemize}
+        \item Async communication: services không blocking nhau
+        \item Decoupling: Crawler không cần biết AI Service có alive không
+        \item Replay capability: có thể replay messages nếu AI Service bị lỗi
+        \item Scalability: thêm consumers dễ dàng
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{Data Layer:}
+\begin{itemize}
+    \item \textbf{PostgreSQL 15}:
+    \begin{itemize}
+        \item Shared database cho tất cả services (đơn giản hóa cho đồ án)
+        \item Tables: users, refresh\_tokens, sources, articles, market\_prices, predictions
+        \item Indexes: symbol, published\_at, crawled\_at
+    \end{itemize}
+    
+    \item \textbf{Redis 7}:
+    \begin{itemize}
+        \item Cache: current prices, top news
+        \item Session storage: refresh tokens
+        \item JWT blacklist khi user logout
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{Ưu nhược điểm Version 4:}
+
+\begin{table}[H]
+\centering
+\caption{Phân tích Version 4 - Implementation hiện tại}
+\begin{tabular}{|p{6.5cm}|p{6.5cm}|}
+\hline
+\textbf{Ưu điểm} & \textbf{Nhược điểm} \\
+\hline
+\textit{Domain separation}: 4 services rõ ràng (Auth, Market, Crawler, AI) & \textit{Complexity tăng}: Nhiều services, Kafka, orchestration \\
+\hline
+\textit{Independent scaling}: AI service có thể scale riêng (cần GPU) & \textit{Network overhead}: Service-to-service calls qua network \\
+\hline
+\textit{Technology diversity}: Golang cho I/O, Python cho AI/ML & \textit{Debugging khó hơn}: Phải trace qua nhiều services \\
+\hline
+\textit{Fault isolation}: AI crash không ảnh hưởng Market/Auth & \textit{Data consistency}: Distributed transactions phức tạp \\
+\hline
+\textit{Independent deploy}: Deploy AI không restart Market & \textit{Cost}: Nhiều containers, message broker, monitoring \\
+\hline
+\textit{Team scalability}: Mỗi team có thể làm 1 service & \textit{DevOps overhead}: CI/CD, monitoring, logging phức tạp \\
+\hline
+\textit{Event-driven}: Kafka enables async, decoupled communication & \textit{Eventual consistency}: Kafka messages không instant \\
+\hline
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Cải thiện so với Version 3:}
+
+\begin{itemize}
+    \item \textbf{Giải quyết vấn đề chính}:
+    \begin{itemize}
+        \item Monolith complexity → Tách thành 4 services độc lập
+        \item Tight coupling → Event-driven với Kafka
+        \item Deploy risk → Deploy từng service riêng
+        \item Technology lock-in → Golang + Python phù hợp từng use case
+    \end{itemize}
+    
+    \item \textbf{Patterns áp dụng}:
+    \begin{itemize}
+        \item API Gateway pattern: Single entry point
+        \item Event-driven architecture: Kafka message broker
+        \item Database per service: Mỗi service có schema riêng (lý tưởng, hiện tại share DB)
+        \item Service discovery: Traefik tự động discover containers
+    \end{itemize}
+    
+    \item \textbf{Trade-offs đã chấp nhận}:
+    \begin{itemize}
+        \item Tăng complexity để đổi lấy modularity
+        \item Network latency để đổi lấy independent scaling
+        \item Eventual consistency (Kafka) thay vì strong consistency
+    \end{itemize}
+    
+    \item \textbf{Hạn chế còn lại}:
+    \begin{itemize}
+        \item Chưa có auto-scaling (manual scale bằng Docker Compose scale)
+        \item Shared database (nên tách database per service)
+        \item Single instance mỗi service (chưa có redundancy)
+        \item No service mesh (Istio/Linkerd) cho mTLS, circuit breaking
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{Docker Compose Orchestration}:
+
+File \texttt{docker-compose.yml} định nghĩa toàn bộ stack:
+
+\begin{itemize}
+    \item \textbf{7 services}: postgres, redis, kafka, traefik, auth, market, crawler, ai
+    \item \textbf{Networks}: crypto-network (bridge network) cho inter-service communication
+    \item \textbf{Volumes}: postgres\_data, redis\_data (persist data)
+    \item \textbf{Health checks}: Đảm bảo services start theo dependency order
+    \item \textbf{Labels}: Traefik routing rules qua Docker labels
+\end{itemize}
+
+\noindent\textbf{Deploy command}: \texttt{docker-compose up -d}
+
+\noindent\textbf{Scale command}: \texttt{docker-compose up -d --scale market-service=3}
+
+% =============================================================================
+\subsection{Version 5: Cloud-Native Auto-scaling (Đề xuất tương lai)}
+% =============================================================================
+
+\textbf{Lưu ý}: Đây là đề xuất lý thuyết cho giai đoạn scale lớn hơn, chưa triển khai.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{arch/ver5.png}
+\caption{Kiến trúc Version 5: Cloud-Native với Kubernetes Auto-scaling (Đề xuất)}
+\label{fig:arch-v5}
+\end{figure}
+
+\noindent\textbf{Trigger để Scale:}
+
+Khi Version 4 không đủ cho production scale lớn:
+
+\begin{itemize}
+    \item \textbf{Traffic spike}: Hàng triệu users đồng thời, không thể manual scale
+    \item \textbf{Data volume}: Hàng TB news/prices mỗi tháng, cần data warehouse
+    \item \textbf{Global distribution}: Users từ nhiều regions, cần low latency
+    \item \textbf{Advanced analytics}: Cần ML pipelines phức tạp, feature stores
+    \item \textbf{SLA requirements}: 99.99\% uptime, multi-region failover
+\end{itemize}
+
+\noindent\textbf{Thành phần Bổ sung}:
+
+\textbf{Kubernetes Orchestration}:
+Thay Docker Compose bằng Kubernetes:
+\begin{itemize}
+    \item \textbf{Deployments}: Mỗi service = 1 deployment với multiple replicas
+    \item \textbf{HPA (Horizontal Pod Autoscaler)}: Auto-scale dựa trên CPU, memory, custom metrics
+    \item \textbf{Service mesh} (Istio/Linkerd): mTLS, circuit breaking, traffic management
+    \item \textbf{Ingress controller}: Nginx Ingress hoặc Traefik
+\end{itemize}
+
+Scale metrics:
+\begin{itemize}
+    \item CPU/Memory utilization
+    \item WebSocket connection count
+    \item Kafka consumer lag
+    \item Custom: requests/sec, AI inference latency
+\end{itemize}
+
+\noindent\textbf{Multi-Region Deployment:}
+\begin{itemize}
+    \item \textbf{Global Load Balancer}: Route users đến region gần nhất
+    \item \textbf{Database replication}: Multi-master hoặc read replicas per region
+    \item \textbf{CDN}: Static assets (frontend bundle) cache globally
+    \item \textbf{Latency}: < 50ms cho hầu hết users worldwide
+\end{itemize}
+
+\textbf{Data Warehouse / Data Lake}:
+Lưu historical data cho analytics:
+\begin{itemize}
+    \item \textbf{Object storage}: Raw data (news HTML, prices CSV)
+    \item \textbf{Data warehouse}: Processed data (BigQuery, Redshift-compatible, ClickHouse)
+    \item \textbf{ETL pipeline}: Spark jobs transform data từ operational DB
+    \item \textbf{Use cases}:
+    \begin{itemize}
+        \item Training ML models với historical data
+        \item Backtesting trading strategies
+        \item Business intelligence dashboards
+    \end{itemize}
+\end{itemize}
+
+\noindent\textbf{ML Platform:}
+\begin{itemize}
+    \item \textbf{Feature Store} (Feast/Tecton): Centralized feature repository
+    \item \textbf{Model registry}: Versioning, A/B testing models
+    \item \textbf{Online inference}: Low-latency serving (<100ms)
+    \item \textbf{Batch inference}: Daily/hourly predictions
+    \item \textbf{ML Ops}: Automated training, monitoring model drift
+\end{itemize}
+
+\textbf{Observability Stack}:
+Full monitoring, logging, tracing:
+\begin{itemize}
+    \item \textbf{Metrics}: Prometheus + Grafana dashboards
+    \item \textbf{Logs}: Centralized (ELK stack, Loki, hoặc vendor solution)
+    \item \textbf{Traces}: Distributed tracing (Jaeger, Zipkin)
+    \item \textbf{Alerts}: PagerDuty/Opsgenie cho on-call
+    \item \textbf{SLIs/SLOs}: Define error budget, uptime targets
+\end{itemize}
+
+\noindent\textbf{Ưu nhược điểm Version 5:}
+
+\begin{table}[H]
+\centering
+\caption{Phân tích Version 5}
+\begin{tabular}{|p{6.5cm}|p{6.5cm}|}
+\hline
+\textbf{Ưu điểm} & \textbf{Nhược điểm} \\
+\hline
+\textit{Auto-scaling}: Tự động thêm/bớt resources theo traffic & \textit{Cost rất cao}: Infrastructure + cloud services \\
+\hline
+\textit{Global reach}: Low latency cho users worldwide & \textit{Complexity cực cao}: Kubernetes, service mesh, multi-region \\
+\hline
+\textit{99.99\% uptime}: Multi-AZ, failover, redundancy & \textit{DevOps team lớn}: Cần nhiều engineers để vận hành \\
+\hline
+\textit{Advanced analytics}: Data lake enable big data processing & \textit{Vendor lock-in risk}: Dễ bị phụ thuộc vào cloud provider \\
+\hline
+\textit{ML at scale}: Feature store, model serving, A/B testing & \textit{Over-engineering}: Chỉ cần khi thực sự có traffic lớn \\
+\hline
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Cải thiện so với Version 4:}
+
+\begin{itemize}
+    \item \textbf{Giải quyết vấn đề}:
+    \begin{itemize}
+        \item Manual scaling → Auto-scaling với Kubernetes HPA
+        \item Single region → Multi-region cho global users
+        \item Limited monitoring → Full observability stack
+        \item Ad-hoc ML → Structured ML platform
+    \end{itemize}
+    
+    \item \textbf{Khi nào cần Version 5}:
+    \begin{itemize}
+        \item Traffic thực sự đạt hàng chục nghìn users concurrent
+        \item Revenue justify cost (hàng ngàn USD/tháng infrastructure)
+        \item Team có DevOps/SRE engineers chuyên nghiệp
+        \item Business yêu cầu SLA chặt chẽ (99.9\%+)
+    \end{itemize}
+    
+    \item \textbf{Warning}:
+    \begin{itemize}
+        \item \textit{Premature optimization}: Không nên jump từ V4 → V5 quá sớm
+        \item \textit{Cost explosion}: Cloud costs có thể tăng 10-50x
+        \item \textit{Complexity debt}: Khó maintain nếu team không đủ kỹ năng
+    \end{itemize}
+\end{itemize}
+
+% =============================================================================
+\subsection{So sánh và Đánh giá các Phiên bản}
+% =============================================================================
+
+\begin{table}[H]
+\centering
+\caption{So sánh chi tiết các phiên bản kiến trúc}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{|l|c|c|c|>{\columncolor{yellow!30}}c|c|}
+\hline
+\textbf{Đặc điểm} & \textbf{V1} & \textbf{V2} & \textbf{V3} & \textbf{V4 (Hiện tại)} & \textbf{V5} \\
+\hline
+\textbf{Target Users} & 10-100 & 100-1K & 1K-10K & 10K-100K & 100K-1M+ \\
+\hline
+\textbf{Architecture} & Monolith & Monolith & Monolith & Microservices & Cloud-Native \\
+\hline
+\textbf{App Servers} & 1 & 1 & N (manual) & 4 services & N (auto-scale) \\
+\hline
+\textbf{Database} & Local & Managed & + Replicas & Shared PostgreSQL & Distributed \\
+\hline
+\textbf{Load Balancer} & None & None & Nginx/HAProxy & Traefik Gateway & Multi-region LB \\
+\hline
+\textbf{Message Queue} & None & None & Redis/Rabbit & Kafka & Kafka cluster \\
+\hline
+\textbf{Cache} & None & None & Redis & Redis & Redis cluster \\
+\hline
+\textbf{Storage} & Local disk & Object store & Object store & Object store & + Data Lake \\
+\hline
+\textbf{Orchestration} & None & None & Scripts & Docker Compose & Kubernetes \\
+\hline
+\textbf{Monitoring} & Logs & Logs & Basic metrics & Prometheus & Full stack \\
+\hline
+\textbf{Deployment} & Manual & Manual & Manual & Docker & CI/CD + K8s \\
+\hline
+\textbf{Availability} & Low (SPOF) & Medium & High & High & Very High \\
+\hline
+\textbf{Scalability} & Vertical only & Vertical & Horizontal & Per-service & Auto-scaling \\
+\hline
+\textbf{Complexity} & Very Low & Low & Medium & High & Very High \\
+\hline
+\textbf{DevOps effort} & Minimal & Low & Medium & High & Very High \\
+\hline
+\textbf{Monthly Cost} & \$10-50 & \$100-300 & \$500-2K & \$1K-5K & \$10K+ \\
+\hline
+\textbf{Team size} & 1-2 devs & 2-3 devs & 3-5 devs & 4-8 devs & 10+ team \\
+\hline
+\end{tabular}
+}
+\end{table}
+
+\textbf{Ghi chú về bảng}:
+\begin{itemize}
+    \item \textit{Highlight màu vàng}: Version 4 là implementation hiện tại của dự án
+    \item \textit{Cost}: Ước tính cho infrastructure, không bao gồm development cost
+    \item \textit{Team size}: Số lượng engineers cần để develop + maintain
+\end{itemize}
+
+% =============================================================================
+\subsection{Nguyên tắc và Kết luận}
+% =============================================================================
+
+\textbf{Nguyên tắc Scale-up Architecture}:
+
+Quá trình evolution của Crypto Analytics Platform tuân theo các best practices:
+
+\begin{enumerate}
+    \item \textbf{Start Simple, Scale When Needed}:
+    \begin{itemize}
+        \item V1 monolith đủ cho proof of concept và MVP
+        \item Không premature optimization - chỉ scale khi có real bottleneck
+        \item "Premature optimization is the root of all evil" - Donald Knuth
+    \end{itemize}
+    
+    \item \textbf{Measure Before Optimize}:
+    \begin{itemize}
+        \item Profile application để tìm bottlenecks (CPU, memory, I/O, network)
+        \item Load testing để validate scalability assumptions
+        \item Monitor metrics: response time, throughput, error rate
+    \end{itemize}
+    
+    \item \textbf{Incremental Evolution}:
+    \begin{itemize}
+        \item V1 → V2: Tách data layer khi storage/DB là bottleneck
+        \item V2 → V3: Thêm load balancer khi single server không đủ
+        \item V3 → V4: Microservices khi monolith quá phức tạp
+        \item V4 → V5: Cloud-native khi cần global scale
+    \end{itemize}
+    
+    \item \textbf{Embrace Trade-offs}:
+    \begin{itemize}
+        \item Simplicity vs Scalability
+        \item Cost vs Performance
+        \item Consistency vs Availability (CAP theorem)
+        \item Development speed vs Operational complexity
+    \end{itemize}
+    
+    \item \textbf{Right Tool for Right Job}:
+    \begin{itemize}
+        \item Golang cho I/O-bound services (Market, Crawler)
+        \item Python cho ML/AI workloads
+        \item Kafka cho async, high-throughput messaging
+        \item Redis cho caching, PostgreSQL cho persistent data
+    \end{itemize}
+\end{enumerate}
+
+\noindent\textbf{Implementation hiện tại:}
+
+Dự án đang ở \textbf{Version 4} với kiến trúc microservices event-driven:
+
+\begin{table}[H]
+\centering
+\caption{Stack công nghệ Version 4}
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Component} & \textbf{Technology} \\
+\hline
+Services & 4 microservices: Auth, Market, Crawler, AI \\
+\hline
+Languages & Golang (3 services) + Python (AI service) \\
+\hline
+API Gateway & Traefik reverse proxy \\
+\hline
+Message Broker & Apache Kafka (KRaft mode) \\
+\hline
+Database & PostgreSQL 15 (shared) \\
+\hline
+Cache & Redis 7 \\
+\hline
+Orchestration & Docker Compose \\
+\hline
+Frontend & React + TypeScript + Vite \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Lý do chọn Version 4}:
+\begin{itemize}
+    \item \textit{Production-ready}: Đủ professional cho demo và portfolio
+    \item \textit{Reasonable complexity}: Không quá đơn giản, không quá phức tạp
+    \item \textit{Learning value}: Cover nhiều concepts (microservices, event-driven, Docker)
+    \item \textit{Cost-effective}: Chạy được trên laptop/VPS giá rẻ
+    \item \textit{Scalable}: Có thể scale lên V5 khi thực sự cần
+\end{itemize}
+
+\textbf{Migration path về tương lai}:
+\begin{itemize}
+    \item Short-term: Optimize hiện tại (connection pooling, query optimization, caching)
+    \item Medium-term: Separate databases per service, add read replicas
+    \item Long-term: Migrate sang Kubernetes nếu traffic demands it
+\end{itemize}
