@@ -27,6 +27,33 @@ class ApiClient {
   private isRefreshing = false;
   private refreshSubscribers: Array<(token: string) => void> = [];
 
+  /**
+   * Centralized token storage — used by register, login, refreshToken, and interceptor.
+   */
+  private storeTokens(accessToken: string, refreshToken?: string, expiresIn?: number) {
+    Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, accessToken, {
+      expires: expiresIn
+        ? new Date(Date.now() + expiresIn * 1000)
+        : new Date(Date.now() + 15 * 60 * 1000), // default 15 min
+      secure: window.location.protocol === "https:",
+      sameSite: "Lax",
+    });
+    if (refreshToken) {
+      Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, refreshToken, {
+        expires: 7, // 7 days
+        secure: window.location.protocol === "https:",
+        sameSite: "Lax",
+      });
+    }
+    window.dispatchEvent(new Event("auth-state-changed"));
+  }
+
+  private clearTokens() {
+    Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
+    Cookies.remove(COOKIE_NAMES.REFRESH_TOKEN);
+    window.dispatchEvent(new Event("auth-state-changed"));
+  }
+
   constructor() {
     this.client = axios.create({
       baseURL: `${API_BASE_URL}${API_VERSION_PREFIX}`,
@@ -100,19 +127,8 @@ class ApiClient {
             
             const { access_token, refresh_token: newRefreshToken, expires_in } = response.data;
 
-            // Update access token cookie with correct expiry
-            Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, access_token, {
-              expires: new Date(Date.now() + expires_in * 1000),
-              httpOnly: false,
-            });
-
-            // Update refresh token if provided
-            if (newRefreshToken) {
-              Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, newRefreshToken, {
-                expires: 7, // 7 days
-                httpOnly: false,
-              });
-            }
+            // Store refreshed tokens
+            this.storeTokens(access_token, newRefreshToken, expires_in);
 
             // Notify all queued requests with new token
             this.refreshSubscribers.forEach((cb) => cb(access_token));
@@ -125,8 +141,7 @@ class ApiClient {
             // Refresh failed, notify queued requests and redirect to login
             this.refreshSubscribers.forEach((cb) => cb(''));
             this.refreshSubscribers = [];
-            Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
-            Cookies.remove(COOKIE_NAMES.REFRESH_TOKEN);
+            this.clearTokens();
             
             // Only redirect if we're not already on the login page
             if (window.location.pathname !== '/login') {
@@ -150,17 +165,10 @@ class ApiClient {
       credentials
     );
 
-    // Store tokens in cookies (backend should set httpOnly cookies, but we also set them client-side)
+    // Store tokens in cookies
     if (response.data) {
       const authData = response.data;
-      Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, authData.access_token, {
-        expires: new Date(Date.now() + authData.expires_in * 1000),
-        httpOnly: false,
-      });
-      Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, authData.refresh_token, {
-        expires: 7, // 7 days
-        httpOnly: false,
-      });
+      this.storeTokens(authData.access_token, authData.refresh_token, authData.expires_in);
     }
 
     return response.data;
@@ -172,17 +180,10 @@ class ApiClient {
       credentials
     );
 
-    // Store tokens in cookies (backend should set httpOnly cookies, but we also set them client-side)
+    // Store tokens in cookies
     if (response.data) {
       const authData = response.data;
-      Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, authData.access_token, {
-        expires: new Date(Date.now() + authData.expires_in * 1000),
-        httpOnly: false,
-      });
-      Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, authData.refresh_token, {
-        expires: 7, // 7 days
-        httpOnly: false,
-      });
+      this.storeTokens(authData.access_token, authData.refresh_token, authData.expires_in);
     }
 
     return response.data;
@@ -198,16 +199,7 @@ class ApiClient {
 
     if (response.data) {
       const authData = response.data;
-      Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, authData.access_token, {
-        expires: new Date(Date.now() + authData.expires_in * 1000),
-        httpOnly: false,
-      });
-      if (authData.refresh_token) {
-        Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, authData.refresh_token, {
-          expires: 7, // 7 days
-          httpOnly: false,
-        });
-      }
+      this.storeTokens(authData.access_token, authData.refresh_token, authData.expires_in);
     }
 
     return response.data;
@@ -222,8 +214,7 @@ class ApiClient {
         console.error("Logout error:", error);
       }
     }
-    Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
-    Cookies.remove(COOKIE_NAMES.REFRESH_TOKEN);
+    this.clearTokens();
   }
 
   async getMe(): Promise<User> {

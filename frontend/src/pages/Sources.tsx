@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import type { Source } from '../types';
 import Layout from '../components/Layout';
+import { extractErrorMessage } from '../utils/errors';
 
 export default function Sources() {
   const navigate = useNavigate();
@@ -24,8 +25,7 @@ export default function Sources() {
       setSources(data || []);
     } catch (err) {
       console.error('Error fetching sources:', err);
-      const error = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(error.response?.data?.message || error.message || 'Failed to load sources');
+      setError(extractErrorMessage(err, 'Failed to load sources'));
     } finally {
       setLoading(false);
     }
@@ -41,8 +41,7 @@ export default function Sources() {
       await apiClient.deleteSource(sourceId);
       setSources(sources.filter((s) => s.source_id !== sourceId));
     } catch (err) {
-      const error = err as { response?: { data?: { message?: string } }; message?: string };
-      alert(error.response?.data?.message || error.message || 'Failed to delete source');
+      alert(extractErrorMessage(err, 'Failed to delete source'));
     } finally {
       setDeletingId(null);
     }
@@ -58,8 +57,7 @@ export default function Sources() {
         fetchSources();
       }, 3000);
     } catch (err) {
-      const error = err as { response?: { data?: { message?: string } }; message?: string };
-      alert(error.response?.data?.message || error.message || 'Failed to trigger analysis');
+      alert(extractErrorMessage(err, 'Failed to trigger analysis'));
     } finally {
       setAnalyzingId(null);
     }

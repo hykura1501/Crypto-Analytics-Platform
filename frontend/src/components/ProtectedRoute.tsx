@@ -1,7 +1,4 @@
-import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import Cookies from 'js-cookie';
-import { COOKIE_NAMES } from '../config';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ProtectedRouteProps {
@@ -21,13 +18,8 @@ export default function ProtectedRoute({ children, adminOnly = false }: Protecte
     );
   }
 
-  // Check if we have tokens (AuthContext will handle refresh if needed)
-  const accessToken = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
-  const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
-  
-  // Only redirect to login if we have neither token AND no user
-  // If we have refresh token, AuthContext will try to refresh
-  if (!accessToken && !refreshToken && !user) {
+  // AuthContext already handles token refresh — just check user presence
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 

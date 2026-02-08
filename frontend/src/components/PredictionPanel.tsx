@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../api/client';
 import type { PredictionResult } from '../types';
+import { extractErrorMessage } from '../utils/errors';
 
 interface PredictionPanelProps {
   symbol: string;
@@ -14,19 +15,19 @@ export default function PredictionPanel({ symbol, horizonHours, onRefresh }: Pre
   const [error, setError] = useState<string | null>(null);
   const [isTraining, setIsTraining] = useState(false);
 
-  const fetchPrediction = async () => {
+  const fetchPrediction = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const result = await apiClient.getPrediction(symbol, horizonHours);
       setPrediction(result);
       if (onRefresh) onRefresh();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to fetch prediction');
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to fetch prediction'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [symbol, horizonHours, onRefresh]);
 
   const handleTrain = async () => {
     setIsTraining(true);
@@ -34,8 +35,8 @@ export default function PredictionPanel({ symbol, horizonHours, onRefresh }: Pre
     try {
       await apiClient.trainModel({ symbol, horizon_hours: horizonHours, years: 2 });
       await fetchPrediction();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to train model');
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to train model'));
     } finally {
       setIsTraining(false);
     }
@@ -46,8 +47,7 @@ export default function PredictionPanel({ symbol, horizonHours, onRefresh }: Pre
     // Auto-refresh every 5 minutes
     const interval = setInterval(fetchPrediction, 5 * 60 * 1000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, horizonHours]);
+  }, [fetchPrediction]);
 
   const currentPrice = prediction ? parseFloat(prediction.current_price) : 0;
   const predictedPrice = prediction ? parseFloat(prediction.predicted_price) : 0;

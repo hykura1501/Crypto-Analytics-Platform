@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { type Article, type Source } from '../types';
 import { apiClient } from '../api/client';
 import Layout from '../components/Layout';
+import { getSentimentColor, formatTime } from '../utils/formatters';
+import { extractErrorMessage } from '../utils/errors';
 
 export default function News() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -85,8 +87,7 @@ export default function News() {
       setNextCursor(response.next_cursor);
       setHasMore(response.has_more);
     } catch (err) {
-      const error = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(error.response?.data?.message || error.message || 'Failed to load news');
+      setError(extractErrorMessage(err, 'Failed to load news'));
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -122,34 +123,6 @@ export default function News() {
       }
     };
   }, [hasMore, loadingMore, loading, nextCursor, fetchNews]);
-
-  const getSentimentColor = (sentimentScore?: number): string => {
-    if (sentimentScore === undefined || sentimentScore === null) {
-      return 'text-gray-500';
-    }
-    if (sentimentScore > 0) {
-      return 'text-green-600';
-    } else if (sentimentScore < 0) {
-      return 'text-red-600';
-    }
-    return 'text-gray-500';
-  };
-
-  const formatTime = (timeString: string): string => {
-    if (!timeString) return '';
-    const date = new Date(timeString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
-  };
 
   return (
     <Layout>
