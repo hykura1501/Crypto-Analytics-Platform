@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"time"
 )
@@ -53,7 +54,7 @@ func Load() *Config {
 			Port: getEnv("REDIS_PORT", "6379"),
 		},
 		JWT: JWTConfig{
-			Secret:        getEnv("JWT_SECRET", "super-secret-key"),
+			Secret:        requireEnv("JWT_SECRET"),
 			AccessExpiry:  parseDuration(getEnv("JWT_ACCESS_EXPIRY", "15m")),
 			RefreshExpiry: parseDuration(getEnv("JWT_REFRESH_EXPIRY", "168h")), // 7 days
 		},
@@ -74,6 +75,14 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func requireEnv(key string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		log.Fatalf("❌ Required environment variable %s is not set", key)
+	}
+	return value
 }
 
 func parseDuration(s string) time.Duration {

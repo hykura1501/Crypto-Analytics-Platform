@@ -54,7 +54,10 @@ func main() {
 	// Default interval for WebSocket (can be made configurable)
 	binanceWS := binance.NewWebSocketClient(cfg.Binance.WSURL, cfg.Binance.Symbols, cfg.Binance.Intervals)
 
-	kafkaProducer := kafka.NewProducer(cfg.Kafka.Broker, cfg.Kafka.Topic)
+	kafkaProducer, err := kafka.NewProducer(cfg.Kafka.Broker, cfg.Kafka.Topic)
+	if err != nil {
+		log.Fatalf("Failed to create Kafka producer: %v", err)
+	}
 	defer kafkaProducer.Close()
 
 	// Create WebSocket hub for frontend clients
