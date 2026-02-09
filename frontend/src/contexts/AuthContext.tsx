@@ -40,40 +40,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const accessToken = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
     const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
     
-    // If no access token but have refresh token, try to refresh first
-    if (!accessToken && refreshToken) {
-      try {
-        setLoading(true);
-        setError(null);
-        await apiClient.refreshToken(refreshToken);
-        // Token refreshed, now fetch user
-        const me = await apiClient.getMe();
-        setUser(me);
-        setLoading(false);
-        return;
-      } catch (e) {
-        // Refresh failed, clear everything
-        setUser(null);
-        setError((e as Error).message);
-        setLoading(false);
-        return;
-      }
-    }
-    
-    // If no token at all
-    if (!accessToken) {
+    // If no tokens at all, clear user
+    if (!accessToken && !refreshToken) {
       setUser(null);
       setLoading(false);
       return;
     }
     
-    // Fetch user with existing access token
+    // Fetch user - the API client interceptor will handle token refresh if needed
     setLoading(true);
     setError(null);
     try {
       const me = await apiClient.getMe();
       setUser(me);
     } catch (e) {
+      // If getMe fails, it means tokens are invalid or refresh failed
       setUser(null);
       setError((e as Error).message);
     } finally {

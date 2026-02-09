@@ -138,9 +138,9 @@ export default function News() {
 
   return (
     <Layout>
-      <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col min-h-full">
         {/* Filters and Sort */}
-        <div className="bg-[#131722] border-b border-[#2a2e39] px-6 py-4 flex-shrink-0">
+        <div className="bg-[#131722] border-b border-[#2a2e39] px-6 py-4 flex-shrink-0 sticky top-0 z-10">
           <div className="container mx-auto flex flex-wrap items-center gap-4">
             {/* Source Filter */}
             <div className="flex items-center gap-2">
@@ -192,7 +192,7 @@ export default function News() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 container mx-auto px-4 py-8 overflow-y-auto">
+        <div className="flex-1 container mx-auto px-4 py-8">
         {loading && articles.length === 0 && (
           <div className="flex items-center justify-center py-20">
             <div className="flex flex-col items-center gap-3">
