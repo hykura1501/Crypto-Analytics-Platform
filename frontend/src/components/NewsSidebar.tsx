@@ -16,7 +16,7 @@ export default function NewsSidebar({ onNewsClick }: NewsSidebarProps) {
       try {
         setLoading(true);
         const data = await apiClient.getNews({ limit: 50 });
-        setArticles(data);
+        setArticles(data.articles);
         setError(null);
       } catch (err) {
         const error = err as { response?: { data?: { message?: string } }; message?: string };
