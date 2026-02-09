@@ -14,7 +14,7 @@ type Producer struct {
 	topic    string
 }
 
-func NewProducer(broker, topic string) *Producer {
+func NewProducer(broker, topic string) (*Producer, error) {
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = true
 	config.Producer.RequiredAcks = sarama.WaitForAll
@@ -23,14 +23,14 @@ func NewProducer(broker, topic string) *Producer {
 
 	producer, err := sarama.NewSyncProducer([]string{broker}, config)
 	if err != nil {
-		log.Panicf("Failed to setup Sarama producer: %v", err)
+		return nil, fmt.Errorf("failed to setup Sarama producer: %w", err)
 	}
 
 	log.Printf("crawler-service: Sarama Kafka producer created for topic: %s at %s", topic, broker)
 	return &Producer{
 		producer: producer,
 		topic:    topic,
-	}
+	}, nil
 }
 
 func (p *Producer) PublishNews(ctx context.Context, newsID int64, title, content string) error {

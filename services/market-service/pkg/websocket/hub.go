@@ -107,17 +107,36 @@ func (h *Hub) Run() {
 		case message := <-h.broadcast:
 			h.mu.RLock()
 			if clients, ok := h.topics[message.Topic]; ok {
+				deadClients := []*Client{}
 				for client := range clients {
 					select {
 					case client.send <- message.Payload:
 					default:
-						close(client.send)
-						// We should probably trigger unregister here, but for now just skip
-						// In a real app, we'd want to clean up this client
+						// Client buffer full — mark for cleanup
+						deadClients = append(deadClients, client)
 					}
 				}
+				h.mu.RUnlock()
+
+				// Clean up dead clients (need write lock)
+				if len(deadClients) > 0 {
+					h.mu.Lock()
+					for _, client := range deadClients {
+						// Remove client from all topics
+						for topic, topicClients := range h.topics {
+							delete(topicClients, client)
+							if len(topicClients) == 0 {
+								delete(h.topics, topic)
+							}
+						}
+						close(client.send)
+						log.Printf("Removed unresponsive client: %v", client.conn.RemoteAddr())
+					}
+					h.mu.Unlock()
+				}
+			} else {
+				h.mu.RUnlock()
 			}
-			h.mu.RUnlock()
 		}
 	}
 }

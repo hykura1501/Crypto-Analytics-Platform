@@ -2,7 +2,9 @@ package handler
 
 import (
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crypto-platform/market-service/internal/model"
@@ -12,10 +14,28 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var allowedOrigins = strings.Split(
+	getEnvDefault("WS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"),
+	",",
+)
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for development
+		origin := r.Header.Get("Origin")
+		for _, allowed := range allowedOrigins {
+			if strings.TrimSpace(allowed) == origin {
+				return true
+			}
+		}
+		return false
 	},
+}
+
+func getEnvDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 type MarketHandler struct {

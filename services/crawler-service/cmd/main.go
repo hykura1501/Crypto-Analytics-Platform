@@ -85,7 +85,11 @@ func main() {
 	// Kafka producer
 	var producer *ckafka.Producer
 	if cfg.Kafka.Broker != "" && cfg.Kafka.Topic != "" {
-		producer = ckafka.NewProducer(cfg.Kafka.Broker, cfg.Kafka.Topic)
+		var err error
+		producer, err = ckafka.NewProducer(cfg.Kafka.Broker, cfg.Kafka.Topic)
+		if err != nil {
+			log.Fatalf("Failed to create Kafka producer: %v", err)
+		}
 		defer producer.Close()
 	}
 

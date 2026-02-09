@@ -123,9 +123,9 @@ class Server:
         @self.app.patch("/api/v1/ai/sentiments")
         async def update_sentiments():
             try:
-                # Select all news from database
+                # Select all news from database that haven't been analyzed yet
                 with self.db.conn.cursor() as cur:
-                    cur.execute("SELECT id, title, content_text, language FROM articles where id > 937 ORDER BY id")
+                    cur.execute("SELECT id, title, content_text, language FROM articles WHERE sentiment_score IS NULL ORDER BY id")
                     news = cur.fetchall()
                     
                     updated_count = 0
