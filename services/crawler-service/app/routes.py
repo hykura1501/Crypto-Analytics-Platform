@@ -1,7 +1,7 @@
 from typing import List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from app.database import get_db
 from app.models import Article
 
@@ -59,19 +59,19 @@ def get_stats(db: Session = Depends(get_db)):
     # By source
     sources = db.query(
         Article.source_id,
-        db.func.count(Article.id).label("count")
+        func.count(Article.id).label("count")
     ).group_by(Article.source_id).all()
     
     # By event type
     events = db.query(
         Article.event_type,
-        db.func.count(Article.id).label("count")
+        func.count(Article.id).label("count")
     ).filter(Article.event_type != None).group_by(Article.event_type).all()
     
     # By language
     languages = db.query(
         Article.language,
-        db.func.count(Article.id).label("count")
+        func.count(Article.id).label("count")
     ).group_by(Article.language).all()
     
     return {
