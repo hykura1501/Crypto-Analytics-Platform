@@ -1,3 +1,4 @@
+import logging
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from config import config
@@ -7,6 +8,9 @@ from internal.prediction import PredictionPipeline
 from internal.sentiment.sentiment import Analyzer
 from internal.db.database import db
 from internal.auth_jwt import verify_prediction_access
+from internal.cache import cache, cache_key, get_cache_ttl
+
+logger = logging.getLogger(__name__)
 
 class RssAnalysisRequest(BaseModel):
     xml_string: str
@@ -20,11 +24,11 @@ class TrainRequest(BaseModel):
     years: int = 2
 
 class Server:
-    def __init__(self, rss_handler: RssHandler, selector_handler: SelectorHandler):
+    def __init__(self, rss_handler: RssHandler, selector_handler: SelectorHandler, sentiment_handler: Analyzer):
         self.app = FastAPI()
         self.rss_handler = rss_handler
         self.selector_handler = selector_handler
-        self.sentiment_handler = Analyzer()
+        self.sentiment_handler = sentiment_handler
         self.prediction = PredictionPipeline(analyzer=self.sentiment_handler)
         self.db = db
         self.setup_routes()
@@ -72,6 +76,12 @@ class Server:
                     horizon_hours=req.horizon_hours,
                     years=req.years
                 )
+                
+                # Invalidate cache for this symbol and horizon after training
+                key = cache_key(req.symbol.upper(), req.horizon_hours)
+                cache.delete(key)
+                logger.info(f"🗑️ Invalidated cache for {req.symbol} {req.horizon_hours}h after training")
+                
                 return {"message": "Training completed", **metrics}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
@@ -79,10 +89,31 @@ class Server:
         @self.app.get("/api/v1/ai/prediction/predict/{symbol}/{horizon_hours}")
         async def predict(symbol: str, horizon_hours: int, _=Depends(verify_prediction_access)):
             try:
+                # Check cache first
+                key = cache_key(symbol.upper(), horizon_hours)
+                cached_result = cache.get(key)
+                
+                if cached_result:
+                    logger.info(f"✅ Cache HIT for {symbol} {horizon_hours}h prediction")
+                    return {
+                        "message": "Prediction completed (cached)",
+                        "result": cached_result,
+                        "cached": True
+                    }
+                
+                # Cache miss - compute prediction
+                logger.info(f"⏳ Cache MISS for {symbol} {horizon_hours}h prediction - computing...")
                 result = self.prediction.predict(symbol=symbol, horizon_hours=horizon_hours)
+                
+                # Cache the result
+                ttl = get_cache_ttl(horizon_hours)
+                cache.set(key, result, ttl=ttl)
+                logger.info(f"💾 Cached prediction for {symbol} {horizon_hours}h (TTL: {ttl}s)")
+                
                 return {
                     "message": "Prediction completed",
-                    "result": result
+                    "result": result,
+                    "cached": False
                 }
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))

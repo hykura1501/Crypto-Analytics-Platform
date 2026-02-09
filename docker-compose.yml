@@ -220,6 +220,8 @@ services:
       - "9001:9001"
     volumes:
       - ./logs/ai-prompts:/tmp/ai-prompts
+      # Mount local models cache to container
+      - ./services/ai-service-python/models_cache:/app/models_cache
     labels:
       - "traefik.enable=true"
       # Route: /api/v1/ai/*
