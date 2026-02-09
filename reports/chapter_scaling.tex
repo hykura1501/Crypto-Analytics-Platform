@@ -715,7 +715,19 @@ Full monitoring, logging, tracing:
 \centering
 \caption{So sánh chi tiết các phiên bản kiến trúc}
 \resizebox{\textwidth}{!}{
-\begin{tabular}{|l|c|c|c|c|c|}
+\begin{tabular}{|l|c|c|c|>{\columncolor{yellow!30}}c|c|}
+\hline
+\textbf{Đặc điểm} & \textbf{V1} & \textbf{V2} & \textbf{V3} & \textbf{V4 (Hiện tại)} & \textbf{V5} \\
+\hline
+\textbf{Target Users} & 10-100 & 100-1K & 1K-10K & 10K-100K & 100K-1M+ \\
+\hline
+\textbf{Architecture} & Monolith & Monolith & Monolith & Microservices & Cloud-Native \\
+\hline
+\textbf{App Servers} & 1 & 1 & N (manual) & 4 services & N (auto-scale) \\
+\hline
+\textbf{Database} & Local & Managed & + Replicas & Shared PostgreSQL & Distributed \\
+\hline
+\textbf{Load Balancer} & None & None & Nginx/HAProxy & Traefik Gateway & Multi-region LB \\
 \hline
 \textbf{Đặc điểm} & \textbf{V1} & \textbf{V2} & \textbf{V3} & \textbf{V4 (Hiện tại)} & \textbf{V5} \\
 \hline
