@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { type Article } from '../types';
 import { apiClient } from '../api/client';
+import { getSentimentColor, getSentimentLabel, getSentimentArrow, formatTime } from '../utils/formatters';
+import { extractErrorMessage } from '../utils/errors';
 
 interface NewsSidebarProps {
   onNewsClick: (publishedAt: string) => void;
@@ -19,8 +21,7 @@ export default function NewsSidebar({ onNewsClick }: NewsSidebarProps) {
         setArticles(data.articles);
         setError(null);
       } catch (err) {
-        const error = err as { response?: { data?: { message?: string } }; message?: string };
-        setError(error.response?.data?.message || error.message || 'Failed to load news');
+        setError(extractErrorMessage(err, 'Failed to load news'));
       } finally {
         setLoading(false);
       }
@@ -31,33 +32,6 @@ export default function NewsSidebar({ onNewsClick }: NewsSidebarProps) {
     const interval = setInterval(fetchNews, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
-
-  const getSentimentColor = (sentimentScore?: number): string => {
-    if (sentimentScore === undefined || sentimentScore === null) {
-      return 'text-gray-500';
-    }
-    if (sentimentScore > 0) {
-      return 'text-green-600';
-    } else if (sentimentScore < 0) {
-      return 'text-red-600';
-    }
-    return 'text-gray-500';
-  };
-
-  const formatTime = (timeString: string): string => {
-    const date = new Date(timeString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
-  };
 
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full overflow-hidden">
@@ -93,7 +67,7 @@ export default function NewsSidebar({ onNewsClick }: NewsSidebarProps) {
               </span>
               {article.sentiment_score !== undefined && article.sentiment_score !== null && (
                 <span className={`text-xs font-semibold ${getSentimentColor(article.sentiment_score)}`}>
-                  {article.sentiment_score > 0 ? 'Positive' : article.sentiment_score < 0 ? 'Negative' : 'Neutral'}
+                  {getSentimentLabel(article.sentiment_score)}
                 </span>
               )}
             </div>
@@ -106,7 +80,7 @@ export default function NewsSidebar({ onNewsClick }: NewsSidebarProps) {
               <span>{formatTime(article.published_at)}</span>
               {article.sentiment_score !== undefined && article.sentiment_score !== null && (
                 <span className={`font-medium ${getSentimentColor(article.sentiment_score)}`}>
-                  {article.sentiment_score > 0 ? '↑' : article.sentiment_score < 0 ? '↓' : '→'}
+                  {getSentimentArrow(article.sentiment_score)}
                 </span>
               )}
             </div>

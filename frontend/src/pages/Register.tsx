@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { extractErrorMessage } from '../utils/errors';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -40,8 +41,8 @@ export default function Register() {
       });
       await refreshUser();
       navigate('/');
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Registration failed');
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Registration failed'));
     } finally {
       setLoading(false);
     }

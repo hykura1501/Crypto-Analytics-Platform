@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '../api/client';
 import type { User, UserRole } from '../types';
 import Layout from '../components/Layout';
+import { extractErrorMessage } from '../utils/errors';
 
 export default function Users() {
   const [users, setUsers] = useState<User[]>([]);
@@ -20,8 +21,7 @@ export default function Users() {
       const data = await apiClient.getUsers();
       setUsers(data ?? []);
     } catch (err) {
-      const e = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(e.response?.data?.message || e.message || 'Failed to load users');
+      setError(extractErrorMessage(err, 'Failed to load users'));
     } finally {
       setLoading(false);
     }
@@ -36,8 +36,7 @@ export default function Users() {
         prev.map((u) => (u.id === user.id ? { ...u, role: newRole } : u))
       );
     } catch (err) {
-      const e = err as { response?: { data?: { message?: string } }; message?: string };
-      alert(e.response?.data?.message || e.message || 'Failed to update role');
+      alert(extractErrorMessage(err, 'Failed to update role'));
     } finally {
       setUpdatingId(null);
     }

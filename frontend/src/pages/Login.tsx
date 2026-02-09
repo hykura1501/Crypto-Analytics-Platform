@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { extractErrorMessage } from '../utils/errors';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -20,8 +21,8 @@ export default function Login() {
       await apiClient.login({ email, password });
       await refreshUser();
       navigate('/');
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Login failed');
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Login failed'));
     } finally {
       setLoading(false);
     }
