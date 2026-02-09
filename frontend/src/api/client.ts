@@ -125,6 +125,7 @@ class ApiClient {
             // Refresh failed, notify queued requests and redirect to login
             this.refreshSubscribers.forEach((cb) => cb(''));
             this.refreshSubscribers = [];
+            this.isRefreshing = false;
             Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
             Cookies.remove(COOKIE_NAMES.REFRESH_TOKEN);
             
