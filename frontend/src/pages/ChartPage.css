@@ -1,0 +1,44 @@
+.chart-page {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-controls {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background-color: #1a1f3a;
+  border-radius: 0.5rem;
+}
+
+.pair-selector,
+.interval-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pair-selector label,
+.interval-selector label {
+  color: #e4e4e7;
+  font-weight: 500;
+}
+
+.pair-selector select,
+.interval-selector select {
+  background-color: #0a0e27;
+  color: #e4e4e7;
+  border: 1px solid #2d3748;
+  border-radius: 0.25rem;
+  padding: 0.5rem;
+  font-size: 1rem;
+}
+
+.chart-container {
+  flex: 1;
+  min-height: 600px;
+}
+

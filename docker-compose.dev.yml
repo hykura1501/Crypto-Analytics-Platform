@@ -1,0 +1,80 @@
+version: '3.8'
+
+# Development docker-compose with hot-reload
+# Usage: docker-compose -f docker-compose.dev.yml up
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: cryptodb
+      POSTGRES_USER: crypto_user
+      POSTGRES_PASSWORD: crypto_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crypto_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: golang:1.21-alpine
+    working_dir: /app
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://crypto_user:crypto_pass@postgres:5432/cryptodb?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      PORT: 8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: sh -c "go mod download && go run main.go"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  crawler:
+    build:
+      context: ./services/crawler
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://crypto_user:crypto_pass@postgres:5432/cryptodb?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./services/crawler:/app
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgres://crypto_user:crypto_pass@postgres:5432/cryptodb?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./services/ai-service:/app
+
+volumes:
+  postgres_data:
+
