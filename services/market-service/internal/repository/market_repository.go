@@ -26,7 +26,7 @@ func NewMarketRepository(db *gorm.DB) MarketRepository {
 func (r *marketRepository) Create(price *model.MarketPrice) error {
 	// Use upsert to handle duplicate klines (Binance sends updates for same minute)
 	return r.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "symbol"}, {Name: "time"}},
+		Columns:   []clause.Column{{Name: "symbol"}, {Name: "time"}, {Name: "interval"}},
 		DoUpdates: clause.AssignmentColumns([]string{"open", "high", "low", "close", "volume"}),
 	}).Create(price).Error
 }
@@ -35,7 +35,11 @@ func (r *marketRepository) BulkCreate(prices []*model.MarketPrice) error {
 	if len(prices) == 0 {
 		return nil
 	}
-	return r.db.Create(prices).Error
+	// Use upsert for bulk create as well
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "symbol"}, {Name: "time"}, {Name: "interval"}},
+		DoUpdates: clause.AssignmentColumns([]string{"open", "high", "low", "close", "volume"}),
+	}).Create(prices).Error
 }
 
 func (r *marketRepository) FindBySymbolAndTimeRange(

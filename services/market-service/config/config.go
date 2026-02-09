@@ -27,9 +27,10 @@ type KafkaConfig struct {
 }
 
 type BinanceConfig struct {
-	APIURL  string
-	WSURL   string
-	Symbols []string
+	APIURL    string
+	WSURL     string
+	Symbols   []string
+	Intervals []string
 }
 
 type ServerConfig struct {
@@ -52,9 +53,10 @@ func Load() *Config {
 			Topic:  getEnv("KAFKA_TOPIC", "market_price_updates"),
 		},
 		Binance: BinanceConfig{
-			APIURL:  getEnv("BINANCE_API_URL", "https://api.binance.com"),
-			WSURL:   getEnv("BINANCE_WS_URL", "wss://stream.binance.com:9443"),
-			Symbols: parseSymbols(getEnv("DEFAULT_SYMBOLS", "BTCUSDT,ETHUSDT")),
+			APIURL:    getEnv("BINANCE_API_URL", "https://api.binance.com"),
+			WSURL:     getEnv("BINANCE_WS_URL", "wss://stream.binance.com:9443"),
+			Symbols:   parseSymbols(getEnv("DEFAULT_SYMBOLS", "BTCUSDT,ETHUSDT")),
+			Intervals: parseSymbols(getEnv("DEFAULT_INTERVALS", "1m,5m,15m,1h,4h,1d")),
 		},
 		Server: ServerConfig{
 			Port:    getEnv("SERVER_PORT", "8082"),

@@ -15,19 +15,19 @@ import (
 type WebSocketClient struct {
 	wsURL       string
 	symbols     []string
-	interval    string
+	intervals   []string
 	conn        *websocket.Conn
 	messageChan chan *model.MarketPrice
 	errorChan   chan error
 	done        chan struct{}
 }
 
-func NewWebSocketClient(wsURL string, symbols []string, interval string) *WebSocketClient {
+func NewWebSocketClient(wsURL string, symbols []string, intervals []string) *WebSocketClient {
 	return &WebSocketClient{
 		wsURL:       wsURL,
 		symbols:     symbols,
-		interval:    interval,
-		messageChan: make(chan *model.MarketPrice, 100),
+		intervals:   intervals,
+		messageChan: make(chan *model.MarketPrice, 300),
 		errorChan:   make(chan error, 10),
 		done:        make(chan struct{}),
 	}
@@ -37,9 +37,11 @@ func NewWebSocketClient(wsURL string, symbols []string, interval string) *WebSoc
 func (ws *WebSocketClient) Connect() error {
 	// Build stream URL
 	// Format: wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/ethusdt@kline_1m
-	streams := make([]string, len(ws.symbols))
+	streams := make([]string, len(ws.symbols)*len(ws.intervals))
 	for i, symbol := range ws.symbols {
-		streams[i] = fmt.Sprintf("%s@kline_%s", strings.ToLower(symbol), ws.interval)
+		for j, interval := range ws.intervals {
+			streams[i*len(ws.intervals)+j] = fmt.Sprintf("%s@kline_%s", strings.ToLower(symbol), interval)
+		}
 	}
 	streamURL := fmt.Sprintf("%s/stream?streams=%s", ws.wsURL, strings.Join(streams, "/"))
 
@@ -49,6 +51,27 @@ func (ws *WebSocketClient) Connect() error {
 	if err != nil {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
+
+	conn.SetPingHandler(func(appData string) error {
+		// 1. Log để biết là Binance vừa Ping mình
+		// log.Println("📡 Received PING from Binance, sending PONG...", appData)
+
+		// 2. Quan trọng: Gia hạn thời gian sống cho kết nối
+		// Nếu nhận được Ping nghĩa là mạng vẫn ngon -> Reset timeout thêm 60s
+		if err := conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			return err
+		}
+
+		// 3. Gửi trả lại PONG (Bắt buộc theo docs Binance)
+		// WriteControl dùng để gửi các frame điều khiển (Ping/Pong/Close)
+		err := conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
+		if err == websocket.ErrCloseSent {
+			return nil
+		} else if e, ok := err.(interface{ Temporary() bool }); ok && e.Temporary() {
+			return nil
+		}
+		return err
+	})
 
 	ws.conn = conn
 	log.Println("Successfully connected to Binance WebSocket")
@@ -62,9 +85,13 @@ func (ws *WebSocketClient) Connect() error {
 func (ws *WebSocketClient) readMessages() {
 	defer func() {
 		ws.conn.Close()
-		close(ws.messageChan)
-		close(ws.errorChan)
+		// Do not close channels here as they are reused on reconnection
+		// close(ws.messageChan)
+		// close(ws.errorChan)
 	}()
+
+	// Set initial read deadline
+	ws.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	for {
 		select {
@@ -73,9 +100,15 @@ func (ws *WebSocketClient) readMessages() {
 		default:
 			_, message, err := ws.conn.ReadMessage()
 			if err != nil {
+				if strings.Contains(err.Error(), "i/o timeout") {
+					log.Println("⚠️ WebSocket connection timed out (no PING/Data from Binance)")
+				}
 				ws.errorChan <- fmt.Errorf("read error: %w", err)
 				return
 			}
+
+			// Reset read deadline on successful message
+			ws.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 			// Parse message
 			var streamData struct {

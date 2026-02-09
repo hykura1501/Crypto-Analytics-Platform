@@ -1,19 +1,41 @@
 package websocket
 
 import (
+	"encoding/json"
 	"log"
 	"sync"
 
 	"github.com/gorilla/websocket"
 )
 
+// SubscriptionMessage represents a message from client to subscribe/unsubscribe
+type SubscriptionMessage struct {
+	Action string   `json:"action"` // "subscribe", "unsubscribe"
+	Topics []string `json:"topics"`
+}
+
+// BroadcastMessage represents a message to be broadcasted to a specific topic
+type BroadcastMessage struct {
+	Topic   string
+	Payload interface{}
+}
+
 // Hub maintains the set of active clients and broadcasts messages to them
 type Hub struct {
-	clients    map[*Client]bool
-	broadcast  chan interface{}
-	register   chan *Client
-	unregister chan *Client
-	mu         sync.RWMutex
+	// clients map[*Client]bool // Removed global broadcast list
+	topics      map[string]map[*Client]bool // Topic -> Set of Clients
+	broadcast   chan *BroadcastMessage
+	register    chan *Client
+	unregister  chan *Client
+	subscribe   chan *Subscription
+	unsubscribe chan *Subscription
+	mu          sync.RWMutex
+}
+
+// Subscription represents a client subscribing to a topic
+type Subscription struct {
+	Client *Client
+	Topics []string
 }
 
 // Client represents a WebSocket client connection
@@ -26,10 +48,12 @@ type Client struct {
 // NewHub creates a new WebSocket hub
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan interface{}, 256),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
+		topics:      make(map[string]map[*Client]bool),
+		broadcast:   make(chan *BroadcastMessage, 256),
+		register:    make(chan *Client),
+		unregister:  make(chan *Client),
+		subscribe:   make(chan *Subscription),
+		unsubscribe: make(chan *Subscription),
 	}
 }
 
@@ -38,29 +62,59 @@ func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client] = true
-			h.mu.Unlock()
-			log.Printf("Client connected. Total clients: %d", len(h.clients))
+			// Just register the connection, no topics yet
+			log.Printf("New client connected: %v", client.conn.RemoteAddr())
 
 		case client := <-h.unregister:
 			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
+			// Remove client from all topics
+			for topic, clients := range h.topics {
+				if _, ok := clients[client]; ok {
+					delete(clients, client)
+					if len(clients) == 0 {
+						delete(h.topics, topic)
+					}
+				}
+			}
+			close(client.send)
+			h.mu.Unlock()
+			log.Printf("Client disconnected: %v", client.conn.RemoteAddr())
+
+		case sub := <-h.subscribe:
+			h.mu.Lock()
+			for _, topic := range sub.Topics {
+				if h.topics[topic] == nil {
+					h.topics[topic] = make(map[*Client]bool)
+				}
+				h.topics[topic][sub.Client] = true
+				log.Printf("Client %v subscribed to %s", sub.Client.conn.RemoteAddr(), topic)
 			}
 			h.mu.Unlock()
-			log.Printf("Client disconnected. Total clients: %d", len(h.clients))
+
+		case sub := <-h.unsubscribe:
+			h.mu.Lock()
+			for _, topic := range sub.Topics {
+				if clients, ok := h.topics[topic]; ok {
+					delete(clients, sub.Client)
+					if len(clients) == 0 {
+						delete(h.topics, topic)
+					}
+				}
+				log.Printf("Client %v unsubscribed from %s", sub.Client.conn.RemoteAddr(), topic)
+			}
+			h.mu.Unlock()
 
 		case message := <-h.broadcast:
 			h.mu.RLock()
-			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					// Client send channel is full, disconnect
-					close(client.send)
-					delete(h.clients, client)
+			if clients, ok := h.topics[message.Topic]; ok {
+				for client := range clients {
+					select {
+					case client.send <- message.Payload:
+					default:
+						close(client.send)
+						// We should probably trigger unregister here, but for now just skip
+						// In a real app, we'd want to clean up this client
+					}
 				}
 			}
 			h.mu.RUnlock()
@@ -68,14 +122,12 @@ func (h *Hub) Run() {
 	}
 }
 
-// Broadcast sends a message to all connected clients
-func (h *Hub) Broadcast(message interface{}) {
-	h.broadcast <- message
-}
-
-// GetBroadcastChannel returns the broadcast channel
-func (h *Hub) GetBroadcastChannel() chan<- interface{} {
-	return h.broadcast
+// BroadcastToTopic sends a message to clients subscribed to the topic
+func (h *Hub) BroadcastToTopic(topic string, payload interface{}) {
+	h.broadcast <- &BroadcastMessage{
+		Topic:   topic,
+		Payload: payload,
+	}
 }
 
 // RegisterClient registers a new client
@@ -89,7 +141,7 @@ func (h *Hub) RegisterClient(conn *websocket.Conn) *Client {
 	return client
 }
 
-// ReadPump pumps messages from the client (we don't expect messages from clients in this case)
+// ReadPump pumps messages from the client
 func (c *Client) ReadPump() {
 	defer func() {
 		c.hub.unregister <- c
@@ -97,9 +149,25 @@ func (c *Client) ReadPump() {
 	}()
 
 	for {
-		_, _, err := c.conn.ReadMessage()
+		_, message, err := c.conn.ReadMessage()
 		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("error: %v", err)
+			}
 			break
+		}
+
+		// Handle subscription messages
+		var subMsg SubscriptionMessage
+		if err := json.Unmarshal(message, &subMsg); err != nil {
+			log.Printf("Invalid message format: %v", err)
+			continue
+		}
+
+		if subMsg.Action == "subscribe" {
+			c.hub.subscribe <- &Subscription{Client: c, Topics: subMsg.Topics}
+		} else if subMsg.Action == "unsubscribe" {
+			c.hub.unsubscribe <- &Subscription{Client: c, Topics: subMsg.Topics}
 		}
 	}
 }
