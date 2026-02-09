@@ -12,6 +12,9 @@ import type {
   MarketPrice,
   RefreshTokenRequest,
   RegisterRequest,
+  Source,
+  CreateSourceRequest,
+  UpdateSourceRequest,
 } from "../types";
 
 class ApiClient {
@@ -206,6 +209,34 @@ class ApiClient {
       params,
     });
     return response.data;
+  }
+
+  // Source endpoints
+  async getSources(): Promise<Source[]> {
+    const response = await this.client.get<{
+      sources: Source[];
+      total: number;
+    }>("/news/sources");
+    return response.data.sources;
+  }
+
+  async getSource(sourceId: string): Promise<Source> {
+    const response = await this.client.get<Source>(`/news/sources/${sourceId}`);
+    return response.data;
+  }
+
+  async createSource(data: CreateSourceRequest): Promise<Source> {
+    const response = await this.client.post<Source>("/news/sources", data);
+    return response.data;
+  }
+
+  async updateSource(sourceId: string, data: UpdateSourceRequest): Promise<Source> {
+    const response = await this.client.put<Source>(`/news/sources/${sourceId}`, data);
+    return response.data;
+  }
+
+  async deleteSource(sourceId: string): Promise<void> {
+    await this.client.delete(`/news/sources/${sourceId}`);
   }
 
   getClient(): AxiosInstance {

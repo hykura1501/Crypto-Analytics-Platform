@@ -86,3 +86,34 @@ export interface ApiErrorResponse {
   message?: string;
 }
 
+// Source Types
+export interface Source {
+  source_id: string;
+  rss_url: string;
+  title_tag?: string;
+  link_tag?: string;
+  pub_date_tag?: string;
+  summary_selector?: string;
+  content_selector?: string;
+  author_selector?: string;
+  tags_selector?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSourceRequest {
+  source_id: string;
+  rss_url: string;
+}
+
+export interface UpdateSourceRequest {
+  rss_url?: string;
+  title_tag?: string;
+  link_tag?: string;
+  pub_date_tag?: string;
+  summary_selector?: string;
+  content_selector?: string;
+  author_selector?: string;
+  tags_selector?: string;
+}
+
