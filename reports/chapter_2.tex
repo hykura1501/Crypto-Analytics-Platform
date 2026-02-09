@@ -1,8 +1,15 @@
 % =============================================================================
-% CHƯƠNG 2: TÌNH HUỐNG 2 - THU THẬP TIN TỨC
+% THU THẬP TIN TỨC TỰ ĐỘNG VỚI AI-POWERED CRAWLER
 % =============================================================================
 
-\section{TÌNH HUỐNG 2: THU THẬP TIN TỨC TỰ ĐỘNG}
+\section{Thu thập Tin tức Tự động với AI-Powered Crawler}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{sequence/sequence_crawler_flow.png}
+\caption{Sequence Diagram: News Crawler Flow với Kafka Event-Driven}
+\label{fig:seq-crawler}
+\end{figure}
 
 \subsection{Bối cảnh}
 
@@ -17,7 +24,7 @@ Yêu cầu hệ thống có thể:
 
 \subsection{Vấn đề với Crawler Truyền thống}
 
-\subsubsection{Lý do crawler truyền thống dễ bị lỗi}
+\noindent\textbf{Lý do crawler truyền thống dễ bị lỗi:}
 
 \begin{enumerate}
     \item \textbf{Phụ thuộc vào cấu trúc HTML}:
@@ -44,283 +51,103 @@ Yêu cầu hệ thống có thể:
 
 \subsection{Giải pháp trong mã nguồn: Crawler Service (Golang)}
 
-\subsubsection{Kiến trúc Crawler Service}
+\noindent\textbf{Kiến trúc Crawler Service:}
 
-Crawler Service được viết bằng Golang với các đặc điểm:
+Crawler Service được viết bằng Golang với các đặc điểm sau:
 \begin{itemize}
-    \item Thu thập tin tức từ RSS feeds (CoinDesk, CoinTelegraph, VNExpress, VnEconomy)
-    \item Sử dụng Kafka để gửi bài viết mới đến AI Service phân tích
-    \item Gemini AI tự động phân tích CSS selectors cho mỗi nguồn tin
-    \item Concurrent crawling với goroutines
+    \item \textbf{Multi-source crawling}: Thu thập tin tức từ RSS feeds của nhiều nguồn khác nhau (CoinDesk, CoinTelegraph, VNExpress, VnEconomy)
+    
+    \item \textbf{Event-driven architecture}: Sử dụng Kafka để gửi bài viết mới đến AI Service để phân tích sentiment và extract keywords
+    
+    \item \textbf{AI-powered selector learning}: Tích hợp Gemini AI để tự động phân tích và học CSS selectors cho mỗi nguồn tin mới, giảm thiểu công việc cấu hình thủ công
+    
+    \item \textbf{Concurrent processing}: Sử dụng goroutines của Golang để crawl nhiều sources đồng thời, tối ưu throughput
+    
+    \item \textbf{Error handling}: Retry với exponential backoff khi có lỗi network hoặc parsing
 \end{itemize}
 
-\begin{lstlisting}[language=Go, caption=Crawler Service Structure (crawler-service/internal/crawler/crawler.go)]
-type Service struct {
-    cfg      *config.Config
-    db       *sql.DB
-    producer *ckafka.Producer
-}
+Kiến trúc code (file: \texttt{crawler-service/internal/crawler/crawler.go}) sử dụng struct \texttt{Service} với dependencies injection (config, database, Kafka producer). Method \texttt{CrawlOnce()} thực hiện một chu kỳ crawl cho tất cả sources, sử dụng \texttt{sync.WaitGroup} và \texttt{atomic.AddInt64} để đếm số bài viết crawled thành công.
 
-// CrawlOnce performs one crawl cycle for all sources
-func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
-    // Query sources from database
-    sources, err := s.getSourcesFromDB(ctx)
-    if err != nil {
-        return 0, fmt.Errorf("failed to get sources from DB: %w", err)
-    }
-    
-    var wg sync.WaitGroup
-    var savedCount int64 // Atomic counter
-    
-    // Process each source concurrently
-    for _, src := range sources {
-        wg.Add(1)
-        go func(source sourceMeta) {
-            defer wg.Done()
-            
-            articles := s.fetchRSS(ctx, source, source.rssURL)
-            
-            for _, article := range articles {
-                articleData, err := s.fetchArticleContent(article, source)
-                if err != nil || len(articleData.content) < 100 {
-                    continue
-                }
-                
-                id, inserted, err := s.insertArticle(ctx, article, articleData)
-                if err != nil || !inserted {
-                    continue
-                }
-                
-                atomic.AddInt64(&savedCount, 1)
-                
-                // Send to Kafka for AI analysis
-                s.producer.SendNewArticle(id, article.Title, articleData.content)
-            }
-        }(src)
-    }
-    
-    wg.Wait()
-    return int(savedCount), nil
-}
-\end{lstlisting}
+\noindent\textbf{Kafka Integration:}
 
-\subsubsection{Kafka Integration}
+Crawler Service đóng vai trò Producer trong Kafka architecture. Mỗi khi crawl được bài viết mới, service sẽ:
+\begin{itemize}
+    \item Marshal article data (ID, title, content, timestamp) thành JSON
+    \item Produce message vào Kafka topic \texttt{news\_new\_article}
+    \item AI Service (Consumer) sẽ nhận và xử lý message này
+\end{itemize}
 
-\begin{lstlisting}[language=Go, caption=Kafka Producer (crawler-service/internal/kafka/producer.go)]
-type Producer struct {
-    producer *kafka.Producer
-    topic    string
-}
+Implementation sử dụng Confluent Kafka library cho Golang với cấu hình: topic partitioning tự động (\texttt{PartitionAny}), async produce để không block crawler thread.
 
-func (p *Producer) SendNewArticle(articleID int64, title, content string) error {
-    msg := map[string]interface{}{
-        "article_id": articleID,
-        "title":      title,
-        "content":    content,
-        "timestamp":  time.Now().Unix(),
-    }
-    
-    value, _ := json.Marshal(msg)
-    
-    return p.producer.Produce(&kafka.Message{
-        TopicPartition: kafka.TopicPartition{
-            Topic: &p.topic, Partition: kafka.PartitionAny,
-        },
-        Value: value,
-    }, nil)
-}
-\end{lstlisting}
+\noindent\textbf{Gemini AI cho CSS Selector Analysis:}
 
-\subsubsection{Gemini AI cho CSS Selector Analysis}
+Gemini AI Client (file: \texttt{ai-service-python/internal/gemini/gemini\_client.py}) sử dụng Google Generative AI SDK với model \texttt{gemini-1.5-flash}. Workflow khi thêm nguồn tin mới:
 
-\begin{lstlisting}[language=Python, caption=Gemini Client (ai-service-python/internal/gemini/gemini_client.py)]
-import google.generativeai as genai
-
-class GeminiClient:
-    def __init__(self, api_key, model_name):
-        if not model_name:
-            model_name = "gemini-1.5-flash"
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
-
-    def generate_content(self, prompt, config=None):
-        response = self.model.generate_content(prompt, generation_config=config)
-        if not response.candidates:
-            raise Exception("no candidates returned")
-        return response.text
-\end{lstlisting}
-
-Khi thêm nguồn tin mới, hệ thống sẽ:
 \begin{enumerate}
-    \item Gửi HTML sample đến Gemini AI qua Kafka
-    \item Gemini phân tích và trả về CSS selectors phù hợp
-    \item Lưu selectors vào database để sử dụng cho các lần crawl sau
+    \item Crawler gửi HTML sample đến AI Service qua Kafka topic \texttt{news\_analyze\_css\_selector}
+    \item Gemini AI phân tích cấu trúc HTML và đề xuất CSS selectors phù hợp cho: title, content, author, date
+    \item Selectors được validate và lưu vào database (bảng \texttt{sources})
+    \item Các lần crawl sau sẽ sử dụng selectors đã học này
+    \item Nếu selector fail (accuracy < 70\%), tự động trigger re-analysis
 \end{enumerate}
 
 \subsection{AI-based Sentiment Analysis}
 
-\subsubsection{AI Service với FinBERT và PhoBERT}
+\noindent\textbf{AI Service với FinBERT và PhoBERT:}
 
 AI Service sử dụng các pre-trained transformer models cho sentiment analysis đa ngôn ngữ:
 
-\begin{lstlisting}[language=Python, caption=Sentiment Analyzer (ai-service-python/internal/sentiment/sentiment.py)]
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from langdetect import detect
-from underthesea import word_tokenize
+\begin{itemize}
+    \item \textbf{FinBERT} (model: \texttt{yiyanghkust/finbert-tone}):
+    \begin{itemize}
+        \item Chuyên biệt cho văn bản tài chính tiếng Anh
+        \item 3 labels: positive, neutral, negative
+        \item Max length: 512 tokens
+        \item Output: sentiment score + attention weights
+    \end{itemize}
+    
+    \item \textbf{PhoBERT} (model: \texttt{wonrax/phobert-base-vietnamese-sentiment}):
+    \begin{itemize}
+        \item Tối ưu cho tiếng Việt
+        \item Sử dụng underthesea cho word tokenization
+        \item Max length: 256 tokens
+        \item Support dấu thanh và ký tự đặc biệt tiếng Việt
+    \end{itemize}
+    
+    \item \textbf{Pipeline}:
+    \begin{itemize}
+        \item Detect language với langdetect library
+        \item Chọn model phù hợp (en → FinBERT, vi → PhoBERT)
+        \item Tokenize và inference
+        \item Extract attention weights cho keyword extraction
+    \end{itemize}
+\end{itemize}
 
-PREPROCESSING_CONFIG = {
-    'finbert': {
-        'model_name': 'yiyanghkust/finbert-tone',
-        'max_length': 512,
-    },
-    'phobert': {
-        'model_name': 'wonrax/phobert-base-vietnamese-sentiment',
-        'max_length': 256,
-    }
-}
+\noindent\textbf{Attention-based Keyword Extraction:}
 
-class Analyzer:
-    """Sentiment analysis using FinBERT (English) & PhoBERT (Vietnamese)"""
-    
-    def __init__(self):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Load FinBERT for English financial text
-        self.finbert_tokenizer = AutoTokenizer.from_pretrained(
-            PREPROCESSING_CONFIG['finbert']['model_name'])
-        self.finbert_model = AutoModelForSequenceClassification.from_pretrained(
-            PREPROCESSING_CONFIG['finbert']['model_name'], 
-            num_labels=3,
-            output_hidden_states=True,
-            output_attentions=True
-        )
-        self.finbert_model.to(self.device)
-        
-        # Load PhoBERT for Vietnamese text
-        self.phobert_tokenizer = AutoTokenizer.from_pretrained(
-            PREPROCESSING_CONFIG['phobert']['model_name'],
-            use_fast=False
-        )
-        self.phobert_model = AutoModelForSequenceClassification.from_pretrained(
-            PREPROCESSING_CONFIG['phobert']['model_name'],
-            output_hidden_states=True,
-            output_attentions=True
-        )
-        self.phobert_model.to(self.device)
-    
-    def analyze(self, text):
-        # Detect language
-        lang = detect(text)
-        
-        if lang == 'vi':
-            # Vietnamese: Use PhoBERT
-            text = word_tokenize(text, format="text")
-            return self._analyze_with_model(
-                text, self.phobert_tokenizer, self.phobert_model)
-        else:
-            # English: Use FinBERT
-            return self._analyze_with_model(
-                text, self.finbert_tokenizer, self.finbert_model)
-\end{lstlisting}
+Hệ thống sử dụng attention mechanism của BERT models để extract keywords quan trọng:
 
-\subsubsection{Attention-based Keyword Extraction}
+\begin{itemize}
+    \item Lấy attention weights từ last layer của model
+    \item Average attention qua tất cả heads
+    \item Tính attention của [CLS] token đối với các tokens khác
+    \item Filter stopwords và tokens ngắn (< 3 ký tự)
+    \item Sort theo attention weight và lấy top-K keywords
+\end{itemize}
 
-\begin{lstlisting}[language=Python, caption=Keyword Extraction from Attention Weights]
-def extract_keywords(self, tokenizer, inputs, outputs, top_k=5):
-    # Get attention weights from the last layer
-    attentions = outputs.attentions[-1]
-    
-    # Average over heads: [batch_size, seq_len, seq_len]
-    attentions_mean = attentions.mean(dim=1)
-    
-    # Get attention of [CLS] token to other tokens
-    cls_attention = attentions_mean[0, 0, :].detach().cpu().numpy()
-    
-    # Get tokens and filter stopwords
-    input_ids = inputs['input_ids'][0]
-    tokens = tokenizer.convert_ids_to_tokens(input_ids)
-    
-    token_weights = {}
-    for i, t in enumerate(tokens):
-        t_clean = t.lower().replace('##', '').replace('_', ' ').strip()
-        if t_clean not in stop_words and len(t_clean) > 2:
-            token_weights[t_clean] = cls_attention[i]
-    
-    # Return top-k keywords by attention weight
-    sorted_kws = sorted(token_weights.items(), 
-                        key=lambda x: x[1], reverse=True)
-    return [kw for kw, weight in sorted_kws[:top_k]]
-\end{lstlisting}
+Ví dụ: Bài báo về "Bitcoin ETF approval by SEC" sẽ extract keywords: \textit{bitcoin, etf, approval, sec, regulation} dựa trên attention scores cao nhất.
 
-\subsubsection{Kafka Consumer cho AI Processing}
+\noindent\textbf{Kafka Consumer cho AI Processing:}
 
-\begin{lstlisting}[language=Python, caption=AI Service Main Loop (ai-service-python/main.py)]
-def main():
-    logging.info("Starting AI Service (Python)...")
-    
-    # Initialize database and Kafka consumer
-    db.init()
-    consumer = KafkaConsumer()
-    
-    # Initialize handlers
-    news_handler = NewsHandler()  # Sentiment analysis
-    gemini_client = GeminiClient(config.gemini.api_key, config.gemini.model)
-    rss_handler = RssHandler(gemini_client)       # RSS structure analysis
-    selector_handler = SelectorHandler(gemini_client)  # CSS selector analysis
-    
-    # Main consumption loop
-    while True:
-        msg, err = consumer.read_message()
-        if err:
-            time.sleep(2)
-            continue
-        
-        topic = msg.topic()
-        value = msg.value().decode('utf-8')
-        
-        if topic == "news_new_article":
-            news_handler.handle(value)  # Analyze sentiment
-        elif topic == "news_analyze_rss_structure":
-            rss_handler.handle(json.loads(value))
-        elif topic == "news_analyze_css_selector":
-            selector_handler.handle(json.loads(value))
-\end{lstlisting}
+AI Service đóng vai trò Consumer, lắng nghe Kafka topics để xử lý:
+\begin{itemize}
+    \item \texttt{news\_new\_article}: Phân tích sentiment cho bài viết mới
+    \item \texttt{news\_analyze\_css\_selector}: Gemini AI phân tích HTML structure
+    \item Batch processing: Process nhiều messages cùng lúc để tối ưu GPU utilization
+    \item Error handling: Failed messages được retry hoặc move vào dead-letter queue
+\end{itemize}
 
-\subsubsection{News-Price Alignment}
-
-\begin{lstlisting}[language=Python, caption=Correlation Analysis]
-def align_news_with_price(self, pair_id, time_window_hours=24):
-    """
-    Align news with historical price for correlation analysis
-    """
-    # Get price before news
-    cur.execute("""
-        SELECT price FROM price_history
-        WHERE pair_id = %s AND timestamp <= %s
-        ORDER BY timestamp DESC LIMIT 1
-    """, (pair_id, published_at))
-    price_before = cur.fetchone()[0]
-    
-    # Get price after news
-    time_after = published_at + timedelta(hours=time_window_hours)
-    cur.execute("""
-        SELECT price FROM price_history
-        WHERE pair_id = %s AND timestamp >= %s AND timestamp <= %s
-        ORDER BY timestamp DESC LIMIT 1
-    """, (pair_id, published_at, time_after))
-    price_after = cur.fetchone()[0]
-    
-    # Calculate correlation
-    price_change = ((price_after - price_before) / price_before) * 100
-    
-    if sentiment_label == 'positive' and price_change > 0:
-        correlation = min(abs(sentiment_score) * abs(price_change) / 10, 1.0)
-    elif sentiment_label == 'negative' and price_change < 0:
-        correlation = min(abs(sentiment_score) * abs(price_change) / 10, 1.0)
-\end{lstlisting}
-
-\textbf{Lưu ý:} Chi tiết về AI Prediction Pipeline với XGBoost và SHAP Explainable AI được trình bày trong chương riêng "AI PREDICTION VỚI EXPLAINABLE AI (XAI)".
+\textbf{Lưu ý:} Chi tiết về AI Prediction Pipeline với XGBoost và SHAP Explainable AI được trình bày trong Chapter 4.
 
 \subsection{So sánh Rule-based vs AI-based Parser}
 
@@ -373,7 +200,7 @@ Scale & Khó - mỗi site cần config & Dễ - một model cho nhiều site \\
 \caption{Kiến trúc Crawler với AI Parser}
 \end{figure}
 
-\subsection{Kết luận Tình huống 2}
+\subsection{Kết luận}
 
 \textbf{Khi nào dùng AI-based parser?}
 \begin{itemize}
@@ -391,4 +218,3 @@ Scale & Khó - mỗi site cần config & Dễ - một model cho nhiều site \\
     \item Resource hạn chế
 \end{itemize}
 
-\newpage

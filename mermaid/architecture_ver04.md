@@ -1,75 +1,73 @@
+---
+title: "Version 4: Microservices Event-Driven (CURRENT IMPLEMENTATION)"
+description: "4 Services + Kafka + Docker Compose (10,000-100,000 users)"
+---
+
 flowchart TB
-    subgraph Client["Client Layer"]
-        WebApp["Web Application"]
-        MobileApp["Mobile App"]
+    subgraph Client["👤 Client Layer"]
+        Frontend["React Frontend<br/><small>Vite + TypeScript + TailwindCSS<br/>Port 5173</small>"]
     end
 
-    subgraph Gateway["API Gateway Layer"]
-        APIGateway["API Gateway<br/>Nginx/Kong/Envoy<br/>AuthN/AuthZ Rate Limiting"]
+    subgraph Gateway["🚪 API Gateway (Traefik)"]
+        Traefik["Traefik Reverse Proxy<br/><small>Port 5000 (HTTP)<br/>Port 8080 (Dashboard)</small><br/>Routing + CORS + Health Checks"]
     end
 
-    subgraph Services["Microservices Layer"]
-        subgraph MarketService["Market Data Service"]
-            MarketAPI["REST API<br/>Price History"]
-            MarketWS["WebSocket Server<br/>Realtime Price"]
-            TimeSeriesDB[("Time-series DB")]
+    subgraph Services["🔧 Microservices Layer (Docker Compose)"]
+        subgraph AuthSvc["🔐 Auth Service"]
+            AuthAPI["Golang + Gin<br/><small>Port 8081</small><br/>JWT + Refresh Token<br/>Role-based Access"]
         end
         
-        subgraph NewsService["News Service"]
-            NewsAPI["REST API<br/>News CRUD"]
-            CrawlerManager["Crawler Manager"]
-            NewsDB[("PostgreSQL")]
-            SearchEngine[("Elasticsearch")]
+        subgraph MarketSvc["📊 Market Service"]
+            MarketAPI["Golang + Gin<br/><small>Port 8082</small><br/>REST API + WebSocket<br/>Hub Pattern"]
         end
         
-        subgraph AIServiceMS["AI Service"]
-            AIAPI["REST API<br/>Sentiment + Prediction"]
-            ModelServer["Model Server"]
+        subgraph CrawlerSvc["🕷️ Crawler Service"]
+            CrawlerAPI["Golang + Colly<br/><small>Port 8083</small><br/>RSS + HTML Parsing<br/>Concurrent Crawling"]
         end
         
-        subgraph AccountService["Account Service"]
-            AccountAPI["REST API<br/>User Auth"]
-            AccountDB[("PostgreSQL")]
+        subgraph AISvc["🤖 AI Service"]
+            AIAPI["Python + Flask<br/><small>Port 9001</small><br/>FinBERT + PhoBERT<br/>XGBoost + SHAP"]
         end
     end
 
-    subgraph MessageBus["Message Bus - Kafka"]
-        TopicNewsRaw["Topic: news_raw"]
-        TopicNewsParsed["Topic: news_parsed"]
-        TopicPriceTicks["Topic: price_ticks"]
-        TopicAISignals["Topic: ai_signals"]
+    subgraph MessageBroker["📨 Message Broker (Kafka)"]
+        Kafka["Apache Kafka 3.7.0<br/><small>KRaft mode (No Zookeeper)<br/>Port 9092</small>"]
+        Topics["<b>Topics:</b><br/>• news_new_article<br/>• news_analyze_css_selector<br/>• news_analyze_rss_structure"]
     end
 
-    subgraph External["External Services"]
-        Binance["Binance API"]
-        NewsSites["News Websites"]
+    subgraph DataLayer["💾 Data Layer"]
+        Postgres[("PostgreSQL 15<br/><small>Port 5432</small><br/>users, articles, prices<br/>predictions, refresh_tokens")]
+        RedisCache[("Redis 7<br/><small>Port 6379</small><br/>Cache + Sessions<br/>Token Blacklist")]
     end
 
-    WebApp --> APIGateway
-    MobileApp --> APIGateway
+    subgraph External["🌍 External Services"]
+        Binance["Binance API<br/><small>WebSocket + REST</small>"]
+        NewsRSS["News Sources<br/><small>CoinDesk, VNExpress<br/>CoinTelegraph, VnEconomy</small>"]
+        GeminiAI["Google Gemini AI<br/><small>CSS Selector Analysis</small>"]
+    end
+
+    Frontend <-->|"HTTP/WebSocket"| Traefik
     
-    APIGateway -->|"/prices/*"| MarketAPI
-    APIGateway -->|"/prices/ws"| MarketWS
-    APIGateway -->|"/news/*"| NewsAPI
-    APIGateway -->|"/ai/*"| AIAPI
-    APIGateway -->|"/account/*"| AccountAPI
+    Traefik -->|"/api/v1/auth/*"| AuthAPI
+    Traefik -->|"/api/v1/market/*"| MarketAPI
+    Traefik -->|"/ws/*"| MarketAPI
+    Traefik -->|"/api/v1/news/*"| CrawlerAPI
+    Traefik -->|"/api/v1/ai/*"| AIAPI
     
-    MarketAPI --> TimeSeriesDB
-    MarketWS --> TopicPriceTicks
-    MarketWS --> Binance
+    AuthAPI <--> Postgres
+    AuthAPI <--> RedisCache
     
-    NewsAPI --> NewsDB
-    NewsAPI --> SearchEngine
-    CrawlerManager --> NewsSites
-    CrawlerManager --> TopicNewsRaw
+    MarketAPI <--> Postgres
+    MarketAPI <--> Binance
     
-    TopicNewsRaw --> NewsAPI
-    NewsAPI --> TopicNewsParsed
-    TopicNewsParsed --> AIAPI
+    CrawlerAPI -->|"Produce"| Kafka
+    CrawlerAPI <--> Postgres
+    CrawlerAPI --> NewsRSS
     
-    AIAPI --> ModelServer
-    AIAPI --> TopicAISignals
+    Kafka -->|"Consume"| AIAPI
+    AIAPI <--> Postgres
+    AIAPI --> GeminiAI
     
-    AccountAPI --> AccountDB
+    Topics -.->|"Part of"| Kafka
     
-    TopicAISignals --> MarketWS
+    note1[/"<b>🎯 CURRENT VERSION</b><br/>Deployed via docker-compose.yml<br/>4 microservices + Kafka<br/>Production-ready for demo"/]

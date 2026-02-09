@@ -1,8 +1,15 @@
 % =============================================================================
-% CHƯƠNG: AI PREDICTION VỚI EXPLAINABLE AI (XAI)
+% DỰ ĐOÁN GIÁ VỚI EXPLAINABLE AI (XAI)
 % =============================================================================
 
-\section{AI PREDICTION VỚI EXPLAINABLE AI (XAI)}
+\section{Dự đoán Giá với Explainable AI (XAI)}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{sequence/sequence_ai_prediction_flow.png}
+\caption{Sequence Diagram: AI Prediction Flow với SHAP Explainable AI}
+\label{fig:seq-ai-prediction}
+\end{figure}
 
 \subsection{Bối cảnh}
 
@@ -13,9 +20,9 @@ Trong hệ thống phân tích tiền mã hóa, ngoài việc thu thập tin t�
     \item \textbf{Giải thích lý do} tại sao mô hình đưa ra dự đoán đó (Explainable AI)
 \end{itemize}
 
-\subsection{Vấn đề với AI "Hộp đen"}
+\subsection{Vấn đề với AI Hộp đen}
 
-\subsubsection{Tại sao cần Explainable AI?}
+\noindent\textbf{Tại sao cần Explainable AI?:}
 
 \begin{enumerate}
     \item \textbf{Thiếu tin tưởng}: Người dùng không muốn đầu tư dựa trên dự đoán mà không hiểu lý do
@@ -26,7 +33,7 @@ Trong hệ thống phân tích tiền mã hóa, ngoài việc thu thập tin t�
 
 \subsection{Giải pháp: XGBoost + SHAP Pipeline}
 
-\subsubsection{Kiến trúc Prediction Pipeline}
+\noindent\textbf{Kiến trúc Prediction Pipeline:}
 
 \begin{figure}[H]
 \centering
@@ -66,178 +73,124 @@ Trong hệ thống phân tích tiền mã hóa, ngoài việc thu thập tin t�
 \caption{AI Prediction Pipeline với SHAP Explainer}
 \end{figure}
 
-\subsubsection{Prediction Pipeline Implementation}
+\noindent\textbf{Prediction Pipeline Implementation:}
 
-\begin{lstlisting}[language=Python, caption=Prediction Pipeline (ai-service-python/internal/prediction.py)]
-class PredictionPipeline:
-    """Prediction pipeline with XGBoost and SHAP"""
-    
-    def __init__(self, analyzer: Optional[Analyzer] = None):
-        self.models = {}  # Store models for each symbol+horizon
-        self.feature_configs = {}  # Store feature names
-        self.explainers = {}  # Store SHAP explainers
-        self.analyzer = analyzer  # Sentiment analyzer
+Class \texttt{PredictionPipeline} (file: \texttt{ai-service-python/internal/prediction.py}) quản lý toàn bộ pipeline:
 
-    def load_price_data(self, symbol: str = "BTCUSDT", years: int = 2):
-        """Load price data from database"""
-        query = """
-            SELECT symbol, time, interval, open, high, low, close, volume
-            FROM market_prices
-            WHERE symbol = %s AND interval = '1h'
-            AND time >= NOW() - INTERVAL '%s years'
-            ORDER BY time ASC
-        """
-        return pd.read_sql(query, db.conn, params=(symbol, years))
+\begin{itemize}
+    \item \textbf{Models storage}: Dictionary lưu models cho từng cặp (symbol, horizon), ví dụ: BTCUSDT-4h, ETHUSDT-24h
     
-    def load_news_data(self, days: int = 730):
-        """Load news with sentiment scores"""
-        query = """
-            SELECT id, source_id, title, content_text, published_at,
-                   sentiment_score, url, language
-            FROM articles
-            WHERE crawled_at >= NOW() - INTERVAL '%s days'
-            ORDER BY crawled_at ASC
-        """
-        return pd.read_sql(query, db.conn, params=(days,))
-\end{lstlisting}
+    \item \textbf{Feature configs}: Lưu tên features được sử dụng cho mỗi model để đảm bảo consistency
+    
+    \item \textbf{SHAP explainers}: Pre-computed explainers cho fast inference
+    
+    \item \textbf{Data loading}:
+    \begin{itemize}
+        \item Load price data: Query \texttt{market\_prices} table với filter theo symbol, interval='1h', timerange
+        \item Load news data: Query \texttt{articles} table với sentiment scores đã calculated
+        \item Default: 2 years price history, 730 days news
+    \end{itemize}
+\end{itemize}
 
 \subsection{Feature Engineering}
 
-\subsubsection{Technical Indicators}
+\noindent\textbf{Technical Indicators:}
 
-\begin{lstlisting}[language=Python, caption=Price Feature Engineering]
-def create_price_features(self, df: pd.DataFrame) -> pd.DataFrame:
-    """Create technical indicator features"""
-    df = df.copy().sort_values('time').reset_index(drop=True)
-    
-    # Returns
-    df['return_1h'] = df['close'].pct_change(1)
-    df['return_24h'] = df['close'].pct_change(24)
-    
-    # Volatility
-    df['volatility_24h'] = df['return_1h'].rolling(24).std()
-    
-    # Simple Moving Average
-    df['sma_7'] = df['close'].rolling(7).mean()
-    df['sma_24'] = df['close'].rolling(24).mean()
-    
-    # RSI (Relative Strength Index)
-    delta = df['close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(14).mean()
-    rs = gain / loss
-    df['rsi'] = 100 - (100 / (1 + rs))
-    
-    # MACD (Moving Average Convergence Divergence)
-    ema12 = df['close'].ewm(span=12).mean()
-    ema26 = df['close'].ewm(span=26).mean()
-    df['macd'] = ema12 - ema26
-    
-    # Lag features
-    df['close_lag_1'] = df['close'].shift(1)
-    df['close_lag_24'] = df['close'].shift(24)
-    
-    return df
-\end{lstlisting}
+Method \texttt{create\_price\_features()} tạo các technical indicators từ price data:
 
-\subsubsection{News Sentiment Features}
+\begin{itemize}
+    \item \textbf{Returns}: \texttt{return\_1h}, \texttt{return\_24h} - tỷ lệ thay đổi giá
+    \item \textbf{Volatility}: \texttt{volatility\_24h} - độ biến động rolling 24h
+    \item \textbf{Moving Averages}: \texttt{sma\_7}, \texttt{sma\_24} - đường trung bình động
+    \item \textbf{RSI}: Relative Strength Index (14 periods) - đo overbought/oversold
+    \item \textbf{MACD}: Moving Average Convergence Divergence - momentum indicator
+    \item \textbf{Lag features}: \texttt{close\_lag\_1}, \texttt{close\_lag\_24} - giá quá khứ
+\end{itemize}
 
-\begin{lstlisting}[language=Python, caption=News Feature Engineering with Time Alignment]
-def process_news(self, news_df: pd.DataFrame, price_df: pd.DataFrame):
-    """Process news and align with price time buckets"""
+\noindent\textbf{News Sentiment Features:}
+
+Method \texttt{process\_news()} align tin tức với price data theo time buckets:
+
+\begin{itemize}
+    \item \textbf{Time alignment}: Round timestamps về hourly buckets (floor to 1h)
+    \item \textbf{Aggregation per hour}:
+    \begin{itemize}
+        \item \texttt{sentiment\_mean}: Trung bình sentiment trong giờ đó
+        \item \texttt{news\_count}: Số lượng bài viết trong giờ
+        \item \texttt{sentiment\_std}: Standard deviation của sentiment
+        \item \texttt{positive\_count}: Số bài positive (sentiment > 0.1)
+    \end{itemize}
     
-    # Round to hourly buckets for alignment
-    news_df['time_bucket'] = news_df['time'].dt.floor('1h')
-    price_df['time_bucket'] = pd.to_datetime(price_df['time']).dt.floor('1h')
+    \item \textbf{Derived features}:
+    \begin{itemize}
+        \item \texttt{sentiment\_positive\_ratio}: Tỷ lệ bài viết positive
+        \item \texttt{sentiment\_lag\_1h}, \texttt{sentiment\_lag\_6h}: Sentiment trễ 1h và 6h
+        \item \texttt{sentiment\_ma\_24h}: Rolling average 24h
+        \item \texttt{sentiment\_std\_24h}: Rolling std 24h
+    \end{itemize}
     
-    # Aggregate news sentiment per hour
-    news_agg = news_df.groupby('time_bucket').agg({
-        'sentiment': ['mean', 'count', 'std', lambda x: (x > 0.1).sum()]
-    }).reset_index()
-    news_agg.columns = ['time_bucket', 'sentiment_mean', 'news_count', 
-                        'sentiment_std', 'positive_count']
-    
-    # Merge with price
-    result = price_df.merge(news_agg, on='time_bucket', how='left')
-    result['sentiment_mean'] = result['sentiment_mean'].fillna(0)
-    result['news_count'] = result['news_count'].fillna(0)
-    
-    # Sentiment-derived features
-    result['sentiment_positive_ratio'] = result['positive_count'] / (result['news_count'] + 1)
-    
-    # Lag features for sentiment
-    result['sentiment_lag_1h'] = result['sentiment_mean'].shift(1).fillna(0)
-    result['sentiment_lag_6h'] = result['sentiment_mean'].shift(6).fillna(0)
-    
-    # Rolling features
-    result['sentiment_ma_24h'] = result['sentiment_mean'].rolling(24, min_periods=1).mean()
-    result['sentiment_std_24h'] = result['sentiment_mean'].rolling(24, min_periods=1).std()
-    
-    return result
-\end{lstlisting}
+    \item \textbf{Merge strategy}: Left join price data với news aggregates, fill missing với 0
+\end{itemize}
 
 \subsection{Model Training với XGBoost}
 
-\begin{lstlisting}[language=Python, caption=XGBoost Training with Feature Selection]
-def train(self, symbol: str = "BTCUSDT", horizon_hours: int = 4, years: int = 2):
-    """Train XGBoost model"""
+Method \texttt{train()} thực hiện training pipeline hoàn chỉnh:
+
+\begin{enumerate}
+    \item \textbf{Data loading}:
+    \begin{itemize}
+        \item Load 2 years price history (default)
+        \item Load 730 days news với sentiment scores
+    \end{itemize}
     
-    # Load and prepare data
-    price_df = self.load_price_data(symbol, years)
-    news_df = self.load_news_data(days=years*365)
+    \item \textbf{Feature engineering}:
+    \begin{itemize}
+        \item Create technical indicators (RSI, MACD, SMA, returns, volatility)
+        \item Align news với price theo time buckets
+        \item Total ~30 features (balanced: 70\% technical, 30\% news)
+    \end{itemize}
     
-    price_df = self.create_price_features(price_df)
-    df = self.process_news(news_df, price_df)
+    \item \textbf{Target creation}:
+    \begin{itemize}
+        \item Target = future price sau \texttt{horizon\_hours} (1h, 4h, 24h)
+        \item Shift(-horizon) để tạo supervised learning problem
+    \end{itemize}
     
-    # Create target: future price after horizon_hours
-    df['target'] = df['close'].shift(-horizon_hours)
-    df = df.dropna(subset=['target'])
+    \item \textbf{Train/Test split}:
+    \begin{itemize}
+        \item 80\% training data (chronological order)
+        \item 20\% test data (most recent)
+        \item No random shuffle - preserve temporal order
+    \end{itemize}
     
-    # Feature selection: ensure balanced news vs technical
-    feature_cols = self.select_features(df, df['target'], n=30)
+    \item \textbf{XGBoost configuration}:
+    \begin{itemize}
+        \item n\_estimators=200 (số trees)
+        \item max\_depth=6 (độ sâu cây)
+        \item learning\_rate=0.05 (slow learning)
+        \item subsample=0.8, colsample\_bytree=0.8 (regularization)
+    \end{itemize}
     
-    # Prepare data
-    X = df[feature_cols].fillna(0)
-    y = df['target']
+    \item \textbf{SHAP explainer initialization}:
+    \begin{itemize}
+        \item TreeExplainer cho XGBoost models
+        \item Pre-compute để fast inference
+    \end{itemize}
     
-    # Train/test split (80/20)
-    split_idx = int(len(X) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-    
-    # Train XGBoost
-    model = xgb.XGBRegressor(
-        n_estimators=200, 
-        max_depth=6, 
-        learning_rate=0.05, 
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42
-    )
-    model.fit(X_train, y_train)
-    
-    # Initialize SHAP explainer
-    self.explainers[model_key] = shap.TreeExplainer(model)
-    
-    # Evaluate
-    y_pred = model.predict(X_test)
-    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-    
-    # Directional accuracy (UP/DOWN prediction)
-    direction_true = np.sign(y_test.diff().iloc[1:])
-    direction_pred = np.sign(pd.Series(y_pred).diff().iloc[1:])
-    dir_acc = (direction_true == direction_pred).mean() * 100
-    
-    return {'rmse': rmse, 'directional_accuracy': dir_acc}
-\end{lstlisting}
+    \item \textbf{Evaluation metrics}:
+    \begin{itemize}
+        \item RMSE: Root Mean Squared Error cho giá dự đoán
+        \item Directional accuracy: \% dự đoán đúng hướng (UP/DOWN)
+    \end{itemize}
+\end{enumerate}
 
 \subsection{SHAP Explainability}
 
-\subsubsection{Giới thiệu SHAP (SHapley Additive exPlanations)}
+\noindent\textbf{Giới thiệu SHAP (SHapley Additive exPlanations):}
 
 SHAP là phương pháp XAI dựa trên lý thuyết trò chơi Shapley value:
 \begin{itemize}
-    \item \textbf{Shapley Value}: Phân bổ "đóng góp" của mỗi feature vào prediction cuối cùng
+    \item \textbf{Shapley Value}: Phân bổ ``đóng góp'' của mỗi feature vào prediction cuối cùng
     \item \textbf{Local Explanation}: Giải thích cho từng prediction cụ thể
     \item \textbf{Feature Importance}: Tổng hợp importance từ nhiều predictions
 \end{itemize}
@@ -253,182 +206,163 @@ Trong đó:
     \item $v(S)$: Giá trị prediction khi chỉ sử dụng features trong $S$
 \end{itemize}
 
-\subsubsection{SHAP Implementation}
+\noindent\textbf{SHAP Implementation:}
 
-\begin{lstlisting}[language=Python, caption=SHAP Explanation trong Prediction]
-def predict(self, symbol: str = "BTCUSDT", horizon_hours: int = 4) -> Dict:
-    """Make prediction with SHAP explanation"""
+Method \texttt{predict()} kết hợp prediction với SHAP explanation:
+
+\begin{enumerate}
+    \item \textbf{Load model và explainer}: Lấy pre-trained model và SHAP explainer cho cặp (symbol, horizon)
     
-    model = self.models.get(model_key)
-    explainer = self.explainers.get(model_key)
-    feature_names = self.feature_configs.get(model_key)
+    \item \textbf{Make prediction}:
+    \begin{itemize}
+        \item Lấy latest data point với tất cả features
+        \item Model predict future price
+        \item Calculate predicted change percentage
+    \end{itemize}
     
-    # Get latest data
-    X = latest[feature_names].fillna(0)
+    \item \textbf{SHAP Explanation}:
+    \begin{itemize}
+        \item Compute SHAP values cho tất cả features
+        \item Sort theo absolute contribution
+        \item Lấy top 10 features có impact lớn nhất
+    \end{itemize}
     
-    # Make prediction
-    current_price = float(latest['close'].iloc[0])
-    predicted_price = float(model.predict(X)[0])
+    \item \textbf{Feature categorization}:
+    \begin{itemize}
+        \item News features: chứa 'sentiment' hoặc 'news' trong tên
+        \item Technical features: RSI, MACD, SMA, returns, volatility
+        \item Calculate news influence percentage
+    \end{itemize}
     
-    # SHAP Explanation
-    explanation = {}
-    if explainer:
-        shap_values = explainer.shap_values(X)
-        feature_contrib = dict(zip(feature_names, shap_values[0]))
-        
-        # Sort by absolute contribution
-        top_contrib = sorted(feature_contrib.items(), 
-                           key=lambda x: abs(x[1]), reverse=True)[:10]
-        explanation = {k: float(v) for k, v in top_contrib}
-    
-    # Separate News vs Technical features
-    news_features = [f for f in feature_names 
-                     if 'sentiment' in f.lower() or 'news' in f.lower()]
-    tech_features = [f for f in feature_names if f not in news_features]
-    
-    return {
-        "predicted_price": str(predicted_price),
-        "current_price": str(current_price),
-        "predicted_change_pct": str((predicted_price - current_price) / current_price * 100),
-        
-        # XAI: Feature analysis
-        "feature_analysis": {
-            "top_news_features": [...],
-            "top_technical_indicators": [...],
-            "shap_contributions": explanation  # SHAP values for each feature
-        },
-        
-        # Human-readable explanation
-        "explanation": {
-            "primary_factors": {
-                "most_important_feature": top_features[0][0],
-                "is_news_important": bool(news dominates),
-                "news_influence_pct": f"{news_pct:.1f}%"
-            }
-        }
-    }
-\end{lstlisting}
+    \item \textbf{Response structure}:
+    \begin{itemize}
+        \item \texttt{predicted\_price}: Giá dự đoán
+        \item \texttt{predicted\_change\_pct}: Phần trăm thay đổi
+        \item \texttt{feature\_analysis}: Top features và SHAP contributions
+        \item \texttt{explanation}: Human-readable factors
+    \end{itemize}
+\end{enumerate}
 
 \subsection{Phân tích Nhân quả (Causal Analysis)}
 
-\subsubsection{Kết hợp Tin tức và Giá}
+\noindent\textbf{Kết hợp Tin tức và Giá:}
 
-Hệ thống thực hiện phân tích nhân quả bằng cách:
+Hệ thống thực hiện causal analysis qua 3 mechanisms:
 
 \begin{enumerate}
-    \item \textbf{Time-aligned Features}: Tin tức được align với khung giờ giá
-    \item \textbf{Lag Features}: Sentiment lag 1h, 6h để capture causal delay
-    \item \textbf{SHAP Contributions}: Xác định feature nào thực sự ảnh hưởng đến prediction
+    \item \textbf{Time-aligned Features}: News được align với price theo hourly buckets để đảm bảo temporal consistency
+    
+    \item \textbf{Lag Features}: 
+    \begin{itemize}
+        \item \texttt{sentiment\_lag\_1h}: Sentiment 1 giờ trước (capture immediate impact)
+        \item \texttt{sentiment\_lag\_6h}: Sentiment 6 giờ trước (capture delayed reaction)
+        \item \texttt{sentiment\_ma\_24h}: Rolling average 24h (capture trend)
+    \end{itemize}
+    
+    \item \textbf{SHAP Contributions}: Xác định feature nào thực sự có causal impact lên prediction (không chỉ correlation)
 \end{enumerate}
 
-\begin{lstlisting}[language=Python, caption=Causal Feature Extraction]
-# Lag features capture causal relationship
-result['sentiment_lag_1h'] = result['sentiment_mean'].shift(1)
-result['sentiment_lag_6h'] = result['sentiment_mean'].shift(6)
+\noindent\textbf{Top News Articles với Keywords:}
 
-# Rolling features for longer-term trends
-result['sentiment_ma_24h'] = result['sentiment_mean'].rolling(24).mean()
-\end{lstlisting}
+Hệ thống extract top influential news articles:
 
-\subsubsection{Top News Articles với Keywords}
-
-\begin{lstlisting}[language=Python, caption=Extract Top Influential News]
-# Get recent news relevant to prediction
-lookback_hours = max(horizon_hours * 2, 48)
-cutoff_time = news_df['time'].max() - timedelta(hours=lookback_hours)
-recent_news = news_df[news_df['time'] >= cutoff_time]
-
-# Extract keywords using Attention weights
-for idx, row in recent_news.head(3).iterrows():
-    text = row['title'] + " " + row['content_text']
-    keywords, _ = self.analyzer.analyze(text, lang=row['language'], top_k=5)
-    
-    top_news_articles.append({
-        "id": row['id'],
-        "title": row['title'],
-        "sentiment_score": row['sentiment_score'],
-        "keywords": keywords[:5]  # Top 5 keywords from attention
-    })
-\end{lstlisting}
+\begin{itemize}
+    \item \textbf{Time window}: Lookback = max(horizon × 2, 48 hours)
+    \item \textbf{Selection}: Lấy 3 bài viết gần nhất trong window
+    \item \textbf{Keyword extraction}: 
+    \begin{itemize}
+        \item Sử dụng attention weights từ FinBERT/PhoBERT
+        \item Extract top 5 keywords có attention score cao nhất
+        \item Keywords giúp user hiểu nội dung chính của tin tức
+    \end{itemize}
+    \item \textbf{Output}: Article ID, title, sentiment score, keywords array
+\end{itemize}
 
 \subsection{Frontend: Prediction Panel}
 
-\begin{lstlisting}[language=TypeScript, caption=PredictionPanel Component (React)]
-interface PredictionResult {
-  predicted_price: string;
-  current_price: string;
-  predicted_change_pct: string;
-  confidence_score: string;
-  explanation: {
-    primary_factors: {
-      most_important_feature: string;
-      is_news_important: boolean;
-      news_influence_pct: string;
-    }
-  };
-  top_news_articles: Array<{
-    id: number;
-    title: string;
-    sentiment_score: number;
-    keywords: string[];
-  }>;
-  feature_analysis: {
-    top_technical_indicators: Array<{ feature: string; importance: number }>;
-  };
-}
+Component \texttt{PredictionPanel.tsx} hiển thị kết quả prediction với explanation:
 
-// Display prediction with explanation
-<div className="prediction-panel">
-  <h3>AI Price Prediction - {symbol} • {horizonHours}h horizon</h3>
-  
-  {/* Price prediction */}
-  <p>Current: ${currentPrice}</p>
-  <p className={isPositive ? 'green' : 'red'}>
-    Predicted: ${predictedPrice} ({changePct}%)
-  </p>
-  
-  {/* Key factors - XAI */}
-  <h4>Key Factors</h4>
-  <p>Primary Factor: {prediction.explanation.primary_factors.most_important_feature}</p>
-  <p>News Influence: {prediction.explanation.primary_factors.news_influence_pct}</p>
-  
-  {/* Top news articles */}
-  <h4>Recent News ({prediction.metadata.recent_news_analyzed} analyzed)</h4>
-  {prediction.top_news_articles.map(article => (
-    <div key={article.id}>
-      <p>{article.title}</p>
-      <span>Sentiment: {article.sentiment_score}</span>
-      <span>Keywords: {article.keywords.join(', ')}</span>
-    </div>
-  ))}
-  
-  {/* Technical indicators */}
-  <h4>Top Technical Indicators</h4>
-  {prediction.feature_analysis.top_technical_indicators.map(ind => (
-    <span className="badge">{ind.feature}</span>
-  ))}
-</div>
-\end{lstlisting}
+\begin{itemize}
+    \item \textbf{Price Information}:
+    \begin{itemize}
+        \item Current price và predicted price
+        \item Predicted change percentage với color coding (green/red)
+        \item Confidence score (0-100\%)
+        \item Prediction horizon (1h, 4h, 24h)
+    \end{itemize}
+    
+    \item \textbf{XAI - Key Factors}:
+    \begin{itemize}
+        \item Primary factor: Feature có SHAP value lớn nhất
+        \item News influence percentage: Tỷ lệ ảnh hưởng của tin tức
+        \item Is news important: Boolean flag
+    \end{itemize}
+    
+    \item \textbf{Recent News Section}:
+    \begin{itemize}
+        \item Hiển thị top 3 bài viết có ảnh hưởng
+        \item Mỗi bài: Title, sentiment score, keywords
+        \item Click vào bài để xem full content
+    \end{itemize}
+    
+    \item \textbf{Technical Indicators}:
+    \begin{itemize}
+        \item List các indicators quan trọng (RSI, MACD, SMA)
+        \item Badge display với color coding
+        \item Tooltip giải thích ý nghĩa
+    \end{itemize}
+    
+    \item \textbf{TypeScript Interface}:
+    \begin{itemize}
+        \item Strong typing cho prediction result
+        \item Nested objects: explanation, feature\_analysis, top\_news\_articles
+        \item Type-safe rendering trong React components
+    \end{itemize}
+\end{itemize}
 
 \subsection{Confidence Score Calculation}
 
-\begin{lstlisting}[language=Python, caption=Multi-factor Confidence Score]
-# 1. Feature coverage (enough features?)
-feature_coverage = len(feature_names) / 30.0
+Confidence score được tính toán dựa trên ba yếu tố chính:
 
-# 2. News availability (recent news available?)
-news_availability = min(1.0, recent_news_count / max(10, horizon_hours // 4))
+\noindent\textbf{1. Feature Coverage (Độ phủ tính năng)}:
 
-# 3. Balance score (model diversity?)
-news_feat_ratio = len(news_features) / len(feature_names)
-balance_score = 1.0 - abs(news_feat_ratio - 0.3)  # Ideal: 30% news features
+Đo lường tỷ lệ số lượng tính năng có sẵn so với số lượng tối đa mong đợi:
+$$C_{feat} = \frac{N_{feat}}{30}$$
 
-# Combined confidence
-confidence = (feature_coverage * 0.4 + news_availability * 0.3 + balance_score * 0.3)
-\end{lstlisting}
+trong đó $N_{feat}$ là số lượng tính năng thực tế được sử dụng, và $30$ là số lượng tính năng tối đa mong đợi.
 
-\textbf{Công thức Confidence}:
-$$confidence = 0.4 \times coverage + 0.3 \times news\_availability + 0.3 \times balance$$
+\noindent\textbf{2. News Availability (Tính sẵn có của tin tức)}:
+
+Đánh giá mức độ đầy đủ của dữ liệu tin tức gần đây so với horizon dự đoán:
+$$C_{news} = \min\left(1.0, \frac{N_{news}}{\max(10, \lfloor H/4 \rfloor)}\right)$$
+
+trong đó:
+\begin{itemize}
+    \item $N_{news}$ là số lượng tin tức gần đây có sẵn
+    \item $H$ là prediction horizon (tính bằng giờ)
+    \item Hàm $\max(10, \lfloor H/4 \rfloor)$ đảm bảo threshold tối thiểu là 10 tin tức
+\end{itemize}
+
+\noindent\textbf{3. Balance Score (Điểm cân bằng)}:
+
+Đo lường sự cân bằng giữa tính năng từ tin tức và tính năng kỹ thuật:
+$$R_{news} = \frac{N_{news\_feat}}{N_{feat}}$$
+$$B = 1 - |R_{news} - 0.3|$$
+
+trong đó:
+\begin{itemize}
+    \item $R_{news}$ là tỷ lệ tính năng từ tin tức trong tổng số tính năng
+    \item $N_{news\_feat}$ là số lượng tính năng được trích xuất từ tin tức
+    \item Giá trị lý tưởng của $R_{news}$ là $0.3$ (30\% tính năng từ tin tức)
+    \item Balance score $B$ đạt giá trị tối đa ($B = 1$) khi $R_{news} = 0.3$
+\end{itemize}
+
+\noindent\textbf{Công thức Confidence Tổng hợp}:
+
+Confidence score cuối cùng là trung bình có trọng số của ba yếu tố trên:
+$$C = 0.4 \times C_{feat} + 0.3 \times C_{news} + 0.3 \times B$$
+
+trong đó các trọng số ($0.4$, $0.3$, $0.3$) phản ánh tầm quan trọng tương đối của từng yếu tố. Confidence score $C$ có giá trị trong khoảng $[0, 1]$, với $C = 1$ biểu thị độ tin cậy cao nhất.
 
 \subsection{Kết luận}
 
@@ -460,5 +394,3 @@ Complexity & Thấp & Cao hơn (cần SHAP computation) \\
     \item Confidence score dựa trên nhiều yếu tố
     \item Support multiple prediction horizons (1h, 4h, 24h)
 \end{itemize}
-
-\newpage

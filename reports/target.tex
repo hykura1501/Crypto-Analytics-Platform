@@ -5,101 +5,126 @@
 \section*{Mục tiêu đồ án}
 \addcontentsline{toc}{section}{Mục tiêu đồ án}
 
-Bài tập nhóm này nhằm giúp sinh viên:
+Đồ án này được thiết kế nhằm phát triển các năng lực cốt lõi về kiến trúc phần mềm cho sinh viên thông qua việc xây dựng một hệ thống phân tích tài chính thời gian thực. Cụ thể, sinh viên sẽ:
 
 \begin{itemize}
-    \item Hiểu bản chất kiến trúc hệ thống phân tán trong các tình huống thực tế, đặc biệt là các hệ thống tài chính AI cần xử lý dữ liệu thời gian thực, thu thập dữ liệu quy mô lớn, và đảm bảo bảo mật khi mở rộng.
+    \item \textbf{Nắm vững bản chất kiến trúc hệ thống phân tán}: Hiểu sâu về các thành phần và cơ chế hoạt động của hệ thống tài chính AI, bao gồm xử lý dữ liệu thời gian thực, thu thập dữ liệu quy mô lớn, và đảm bảo bảo mật khi mở rộng.
     
-    \item Tư duy phản biện và phân tích kỹ thuật chuyên sâu các vấn đề thường gặp trong vận hành hệ thống ở môi trường production: mở rộng kết nối WebSocket, thu thập dữ liệu không ổn định từ nhiều nguồn, bảo vệ hệ thống khỏi tấn công bảo mật.
+    \item \textbf{Phát triển tư duy phản biện và phân tích kỹ thuật}: Xác định và giải quyết các thách thức kỹ thuật thường gặp trong môi trường production, bao gồm mở rộng kết nối WebSocket cho hàng nghìn người dùng đồng thời, xử lý việc thu thập dữ liệu không ổn định từ nhiều nguồn khác nhau, và bảo vệ hệ thống trước các mối đe dọa bảo mật.
     
-    \item Đề xuất kiến trúc phù hợp, thể hiện qua sơ đồ rõ ràng và có lý do giải thích từng thành phần (gateway, load balancer, broker, hash router, LLM parser, auth service...).
+    \item \textbf{Thiết kế và đề xuất kiến trúc hợp lý}: Xây dựng các sơ đồ kiến trúc rõ ràng với giải thích chi tiết cho từng thành phần (API Gateway, Load Balancer, Message Broker, Router, Parser, Authentication Service, v.v.).
     
-    \item Hiểu và so sánh các giải pháp kỹ thuật, phân tích trade-off về hiệu năng, chi phí, khả năng chịu lỗi và mở rộng.
+    \item \textbf{So sánh và đánh giá các giải pháp kỹ thuật}: Phân tích trade-offs giữa các phương án thiết kế về các khía cạnh: hiệu năng, chi phí vận hành, khả năng chịu lỗi (fault tolerance), và khả năng mở rộng (scalability).
     
-    \item Vận dụng LLM như một công cụ hỗ trợ phân tích, biết cách đặt câu hỏi hiệu quả, phản biện và đánh giá kết quả thay vì sao chép máy móc.
+    \item \textbf{Vận dụng AI hỗ trợ phân tích hiệu quả}: Sử dụng Large Language Models như một công cụ hỗ trợ, biết cách đặt câu hỏi (prompt engineering), phản biện và đánh giá kết quả một cách phê phán thay vì chấp nhận máy móc.
     
-    \item Phát triển kỹ năng thiết kế kiến trúc phần mềm hiện đại, áp dụng vào các hệ thống thực tế như: dịch vụ tài chính, streaming, giao dịch thời gian thực, hệ thống phân tích AI, microservices bảo mật cao.
+    \item \textbf{Ứng dụng các pattern và practice hiện đại}: Áp dụng các mẫu thiết kế và thực hành tốt nhất vào các hệ thống thực tế như: dịch vụ tài chính, streaming data, giao dịch thời gian thực, hệ thống phân tích AI, và kiến trúc microservices bảo mật cao.
 \end{itemize}
 
-\subsection*{Yêu cầu sinh viên}
+\subsection*{Yêu cầu đối với sinh viên}
 
-Sinh viên cần:
+Để hoàn thành đồ án này, sinh viên cần thực hiện các nhiệm vụ sau:
+
 \begin{enumerate}
-    \item Tự nghiên cứu vấn đề kỹ thuật dựa vào tình huống.
-    \item Thiết kế sơ đồ kiến trúc minh họa rõ luồng xử lý.
-    \item So sánh và giải thích các giải pháp đã lựa chọn.
-    \item Viết prompt để khai thác LLM một cách hiệu quả và phản biện kết quả nhận được.
-    \item Rút ra bài học tổng kết về tư duy kiến trúc và kỹ năng kỹ thuật.
+    \item \textbf{Nghiên cứu và phân tích vấn đề}: Tự nghiên cứu các vấn đề kỹ thuật dựa trên tình huống thực tế được mô tả, xác định các yêu cầu và ràng buộc của hệ thống.
+    
+    \item \textbf{Thiết kế kiến trúc hệ thống}: Xây dựng sơ đồ kiến trúc chi tiết minh họa rõ ràng luồng xử lý dữ liệu, các thành phần và mối quan hệ giữa chúng.
+    
+    \item \textbf{Đánh giá và lựa chọn giải pháp}: So sánh các phương án khác nhau và giải thích lý do lựa chọn giải pháp cuối cùng dựa trên phân tích trade-offs.
+    
+    \item \textbf{Sử dụng AI hỗ trợ hiệu quả}: Viết các prompt phù hợp để khai thác Large Language Models, sau đó phản biện và đánh giá kết quả nhận được một cách phê phán.
+    
+    \item \textbf{Tổng kết và rút kinh nghiệm}: Rút ra các bài học quan trọng về tư duy kiến trúc phần mềm và nâng cao kỹ năng kỹ thuật.
 \end{enumerate}
 
 \subsection*{Giới thiệu dự án}
 
-Đồ án này nhằm xây dựng một hệ thống phân tích tài chính AI (\textbf{Crypto Analytics Platform}) có khả năng:
+Đồ án tập trung vào việc xây dựng một nền tảng phân tích tài chính dựa trên trí tuệ nhân tạo (\textbf{Crypto Analytics Platform}) với các tính năng chính sau:
+
 \begin{itemize}
-    \item Hiển thị giá cryptocurrency thời gian thực cho hơn 1000 người dùng đồng thời
-    \item Thu thập tin tức từ nhiều nguồn khác nhau với khả năng tự thích ứng
-    \item Phân tích sentiment và dự đoán xu hướng giá bằng AI
-    \item Quản lý tài khoản người dùng với phân quyền (thường/VIP)
-    \item Đảm bảo bảo mật khi mở rộng hệ thống microservices
+    \item \textbf{Hiển thị dữ liệu thời gian thực}: Cung cấp thông tin giá cryptocurrency cập nhật liên tục cho hơn 1,000 người dùng đồng thời thông qua WebSocket connections.
+    
+    \item \textbf{Thu thập tin tức tự động}: Crawl và tổng hợp tin tức từ nhiều nguồn khác nhau với khả năng tự động thích ứng khi cấu trúc HTML của các trang web thay đổi.
+    
+    \item \textbf{Phân tích AI tiên tiến}: Áp dụng các mô hình học máy để phân tích sentiment và dự đoán xu hướng giá, kèm theo giải thích chi tiết (Explainable AI).
+    
+    \item \textbf{Quản lý tài khoản phân cấp}: Hỗ trợ hai loại tài khoản (Free và VIP) với các mức độ truy cập tính năng khác nhau.
+    
+    \item \textbf{Bảo mật đa lớp}: Đảm bảo an toàn thông tin và phân quyền hợp lý trong kiến trúc microservices phân tán.
 \end{itemize}
 
 \subsection*{Yêu cầu chức năng chi tiết}
 
 \begin{mybox}
-\textbf{Điều kiện tiên quyết:} Người dùng có thể chọn cặp tiền giao dịch (BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, ADAUSDT, XRPUSDT...)
+\textbf{Điều kiện tiên quyết:} Người dùng có thể lựa chọn các cặp tiền điện tử khác nhau để theo dõi (BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, ADAUSDT, XRPUSDT, v.v.)
 \end{mybox}
 
-\subsubsection*{1. Thu thập tin tức tài chính (Crawler Service)}
+\subsubsection*{1. Thu thập tin tức tài chính (News Crawler Service)}
 \begin{itemize}
-    \item Thu thập tin tức từ nhiều nguồn khác nhau (CoinTelegraph, CoinDesk, CryptoNews...)
-    \item \textbf{Xác định thông tin cần thiết}: tiêu đề, nội dung, ngày đăng, tác giả, URL nguồn
-    \item \textbf{Tự động học cấu trúc HTML}: mỗi trang có structure khác nhau, hệ thống tự động trích xuất thông tin
-    \item \textbf{Xử lý thay đổi cấu trúc}: khi website thay đổi layout, crawler vẫn hoạt động
-    \item Dữ liệu lưu trữ đầy đủ trong database, hiển thị có chọn lọc trên GUI
+    \item \textbf{Đa nguồn dữ liệu}: Thu thập tin tức tự động từ nhiều trang web tài chính uy tín (CoinTelegraph, CoinDesk, CryptoNews, VNExpress, VnEconomy, v.v.)
+    
+    \item \textbf{Trích xuất thông tin có cấu trúc}: Xác định và lưu trữ các thông tin quan trọng bao gồm tiêu đề bài viết, nội dung chính, thời gian đăng, tên tác giả, và URL nguồn gốc.
+    
+    \item \textbf{Học cấu trúc HTML tự động}: Sử dụng AI (Gemini) để tự động phân tích và học cấu trúc HTML của từng trang web, không cần cấu hình thủ công cho mỗi nguồn.
+    
+    \item \textbf{Thích ứng với thay đổi}: Hệ thống có khả năng tự động điều chỉnh khi các website thay đổi layout hoặc cấu trúc HTML mà không cần can thiệp thủ công.
+    
+    \item \textbf{Quản lý dữ liệu hiệu quả}: Toàn bộ dữ liệu được lưu trữ đầy đủ trong database, đồng thời chỉ hiển thị thông tin được chọn lọc và định dạng phù hợp trên giao diện người dùng.
 \end{itemize}
 
 \subsubsection*{2. Hiển thị biểu đồ giá (Trading Chart)}
 \begin{itemize}
-    \item Giao diện tương tự \url{https://vn.tradingview.com/chart/}
-    \item \textbf{Dữ liệu từ Binance API}: lấy giá lịch sử qua REST API
-    \item \textbf{Cập nhật realtime}: sử dụng WebSocket để nhận giá mới nhất
-    \item \textbf{Đa khung thời gian}: 1m, 5m, 15m, 1h, 4h, 1d, 1w
-    \item \textbf{Đa cặp tiền}: BTCUSDT, ETHUSDT, BNBUSDT...
-    \item \textbf{Kiến trúc scale}: hỗ trợ nhiều người dùng đồng thời
+    \item \textbf{Giao diện chuyên nghiệp}: Thiết kế tương tự TradingView (\url{https://vn.tradingview.com/chart/}) với các công cụ phân tích kỹ thuật cơ bản.
+    
+    \item \textbf{Dữ liệu lịch sử}: Tích hợp với Binance REST API để lấy dữ liệu giá lịch sử cho các phân tích và backtest.
+    
+    \item \textbf{Cập nhật thời gian thực}: Sử dụng Binance WebSocket API để nhận và hiển thị giá mới nhất với độ trễ tối thiểu (< 100ms).
+    
+    \item \textbf{Đa khung thời gian}: Hỗ trợ nhiều timeframes khác nhau (1 phút, 5 phút, 15 phút, 1 giờ, 4 giờ, 1 ngày, 1 tuần) để phù hợp với nhu cầu phân tích của người dùng.
+    
+    \item \textbf{Đa cặp giao dịch}: Cho phép theo dõi đồng thời nhiều cặp tiền điện tử (BTCUSDT, ETHUSDT, BNBUSDT, v.v.)
+    
+    \item \textbf{Kiến trúc có khả năng mở rộng}: Thiết kế để hỗ trợ hàng nghìn người dùng đồng thời với hiệu suất ổn định thông qua WebSocket Hub Pattern.
 \end{itemize}
 
-\subsubsection*{3. Phân tích AI và Sentiment Analysis}
+\subsubsection*{3. Phân tích AI và Dự đoán xu hướng (AI Analytics)}
 \begin{itemize}
-    \item \textbf{Align tin tức với giá}: kết hợp tin tức và giá lịch sử để phân tích
-    \item \textbf{Mô hình AI} (hộp đen - pre-trained):
+    \item \textbf{Kết hợp đa nguồn dữ liệu}: Align tin tức với dữ liệu giá lịch sử theo time buckets để phân tích mối quan hệ nhân quả giữa sự kiện và biến động giá.
+    
+    \item \textbf{Mô hình AI đa ngôn ngữ} (sử dụng pre-trained models):
     \begin{itemize}
-        \item FinBERT: Sentiment analysis cho tiếng Anh (financial domain)
-        \item PhoBERT: Sentiment analysis cho tiếng Việt
-        \item XGBoost: Prediction model kết hợp technical indicators và news sentiment
+        \item \textit{FinBERT}: Phân tích sentiment cho văn bản tài chính tiếng Anh với độ chính xác cao trong financial domain.
+        \item \textit{PhoBERT}: Phân tích sentiment cho văn bản tiếng Việt, đảm bảo xử lý được tin tức từ các nguồn trong nước.
+        \item \textit{XGBoost}: Mô hình dự đoán kết hợp cả technical indicators (RSI, MACD, SMA) và news sentiment scores.
     \end{itemize}
-    \item \textbf{Phân tích nhân quả (Causal Analysis) - Explainable AI}:
+    
+    \item \textbf{Explainable AI (XAI) - Trí tuệ nhân tạo có thể giải thích}:
     \begin{itemize}
-        \item Dự đoán xu hướng giờ/ngày tiếp theo: UP/DOWN
-        \item SHAP (SHapley Additive exPlanations) để giải thích tại sao
-        \item Hiển thị top news articles có ảnh hưởng nhất với keywords
-        \item Độ tin cậy (confidence score) cho mỗi prediction
+        \item \textit{Dự đoán xu hướng}: Dự báo hướng di chuyển giá (UP/DOWN) trong các khung thời gian khác nhau (1 giờ, 4 giờ, 24 giờ).
+        \item \textit{SHAP Analysis}: Sử dụng SHapley Additive exPlanations để giải thích đóng góp của từng feature vào kết quả dự đoán.
+        \item \textit{Top Influential News}: Hiển thị các bài báo có ảnh hưởng lớn nhất kèm theo keywords được trích xuất bằng attention mechanism.
+        \item \textit{Confidence Score}: Cung cấp độ tin cậy cho mỗi dự đoán dựa trên feature coverage, news availability và model balance.
     \end{itemize}
 \end{itemize}
 
-\subsubsection*{4. Quản lý tài khoản (Account Management)}
+\subsubsection*{4. Quản lý tài khoản phân cấp (Account Management)}
 \begin{itemize}
-    \item \textbf{Tài khoản thường (Free)}:
+    \item \textbf{Tài khoản Free (Miễn phí)}:
     \begin{itemize}
-        \item Xem biểu đồ giá realtime
-        \item Xem tin tức cơ bản
-        \item Quản lý watchlist
+        \item Xem biểu đồ giá thời gian thực với các công cụ kỹ thuật cơ bản
+        \item Truy cập danh sách tin tức tài chính từ các nguồn đã tổng hợp
+        \item Tạo và quản lý watchlist các cặp tiền yêu thích
+        \item Tùy chỉnh giao diện và cài đặt hiển thị cá nhân
     \end{itemize}
+    
     \item \textbf{Tài khoản VIP (Premium)}:
     \begin{itemize}
-        \item Tất cả tính năng của tài khoản thường
-        \item Xem phân tích AI và sentiment analysis
-        \item Nhận dự đoán xu hướng với lý do chi tiết
-        \item Xem correlation giữa tin tức và giá
+        \item Toàn bộ tính năng của tài khoản Free
+        \item Truy cập phân tích AI sentiment với điểm số chi tiết
+        \item Nhận dự đoán xu hướng giá kèm giải thích bằng SHAP values
+        \item Xem mối tương quan (correlation) giữa tin tức và biến động giá
+        \item Truy cập Feature Importance Analysis và Top Influential News
+        \item API access với rate limit cao hơn
     \end{itemize}
 \end{itemize}
 
@@ -159,22 +184,45 @@ Container & Docker Compose & Orchestration \\
 \end{tabular}
 \end{table}
 
-\subsection*{Kiến trúc tổng quan}
+\subsection*{Kiến trúc hệ thống tổng quan}
 
-Hệ thống được thiết kế theo kiến trúc microservices với Kafka message broker:
+Hệ thống được thiết kế theo kiến trúc microservices với event-driven architecture sử dụng Apache Kafka làm message broker. Kiến trúc này được tổ chức thành các lớp (layers) rõ ràng như sau:
 
 \begin{enumerate}
-    \item \textbf{Client Layer}: Frontend React với Trading Chart và các pages (Dashboard, News, Sources)
-    \item \textbf{Microservices Layer}:
+    \item \textbf{Client Layer (Lớp giao diện người dùng)}: 
     \begin{itemize}
-        \item Auth Service: Xác thực, phân quyền (JWT + Refresh Token)
-        \item Market Service: Binance WebSocket, Price data, Client Hub
-        \item Crawler Service: RSS parsing, HTML crawling, Kafka producer
-        \item AI Service: Sentiment analysis, Prediction, SHAP explanation
+        \item Single-Page Application được xây dựng bằng React, TypeScript và Vite
+        \item Tích hợp Lightweight Charts library cho Trading Chart
+        \item Các trang chính: Dashboard, News Management, Source Configuration
+        \item WebSocket client để nhận dữ liệu real-time
     \end{itemize}
-    \item \textbf{Message Broker}: Apache Kafka cho async communication
-    \item \textbf{Data Layer}: PostgreSQL (dữ liệu chính) và Redis (cache)
-    \item \textbf{External Services}: Binance API, RSS feeds, Gemini AI
+    
+    \item \textbf{Microservices Layer (Lớp dịch vụ)}:
+    \begin{itemize}
+        \item \textit{Auth Service (Golang)}: Xác thực người dùng, quản lý phiên làm việc với JWT + Refresh Token rotation
+        \item \textit{Market Service (Golang)}: Tích hợp Binance WebSocket, quản lý price data, triển khai WebSocket Hub Pattern
+        \item \textit{Crawler Service (Golang)}: RSS feed parsing, HTML crawling, Kafka producer cho news events
+        \item \textit{AI Service (Python)}: FinBERT/PhoBERT sentiment analysis, XGBoost prediction, SHAP explanations
+    \end{itemize}
+    
+    \item \textbf{Message Broker Layer (Lớp truyền thông bất đồng bộ)}: 
+    \begin{itemize}
+        \item Apache Kafka cluster với các topics: \texttt{news\_new\_article}, \texttt{news\_analyze\_css\_selector}, \texttt{market\_price\_update}
+        \item Đảm bảo async communication, decoupling giữa các services
+    \end{itemize}
+    
+    \item \textbf{Data Layer (Lớp dữ liệu)}:
+    \begin{itemize}
+        \item PostgreSQL 15: Persistent storage cho users, articles, market data, predictions
+        \item Redis 7: Caching layer cho frequent queries, session storage, rate limiting
+    \end{itemize}
+    
+    \item \textbf{External Services (Dịch vụ bên ngoài)}:
+    \begin{itemize}
+        \item Binance API: REST API (lịch sử giá) và WebSocket (real-time)
+        \item RSS Feeds: CoinDesk, CoinTelegraph, VNExpress, VnEconomy
+        \item Google Gemini AI: Phân tích CSS selectors tự động
+    \end{itemize}
 \end{enumerate}
 
 \begin{figure}[H]
@@ -230,4 +278,3 @@ Hệ thống được thiết kế theo kiến trúc microservices với Kafka m
 \caption{Kiến trúc Microservices Crypto Analytics Platform}
 \end{figure}
 
-\newpage
