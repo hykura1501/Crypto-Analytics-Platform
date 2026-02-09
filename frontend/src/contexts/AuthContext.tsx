@@ -37,12 +37,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const refreshUser = useCallback(async () => {
-    const token = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
-    if (!token) {
+    const accessToken = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
+    const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
+    
+    // If no access token but have refresh token, try to refresh first
+    if (!accessToken && refreshToken) {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await apiClient.refreshToken(refreshToken);
+        // Token refreshed, now fetch user
+        const me = await apiClient.getMe();
+        setUser(me);
+        setLoading(false);
+        return;
+      } catch (e) {
+        // Refresh failed, clear everything
+        setUser(null);
+        setError((e as Error).message);
+        setLoading(false);
+        return;
+      }
+    }
+    
+    // If no token at all
+    if (!accessToken) {
       setUser(null);
       setLoading(false);
       return;
     }
+    
+    // Fetch user with existing access token
     setLoading(true);
     setError(null);
     try {
@@ -57,19 +82,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const token = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
-    if (!token) {
+    const accessToken = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
+    const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
+    
+    // If we have neither token, clear user
+    if (!accessToken && !refreshToken) {
       setUser(null);
       setLoading(false);
       return;
     }
+    
+    // refreshUser will handle refreshing if needed
     refreshUser();
   }, [refreshUser]);
 
   useEffect(() => {
     const checkToken = () => {
-      const token = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
-      if (!token && user) {
+      const accessToken = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
+      const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
+      
+      // Only clear user if we have neither token
+      // If refresh token exists, interceptor will handle refresh
+      if (!accessToken && !refreshToken && user) {
         setUser(null);
       }
     };

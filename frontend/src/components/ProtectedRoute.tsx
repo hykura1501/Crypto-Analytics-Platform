@@ -10,15 +10,10 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, adminOnly = false }: ProtectedRouteProps) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const { user, loading: authLoading, isAdmin } = useAuth();
 
-  useEffect(() => {
-    const accessToken = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
-    setIsAuthenticated(!!accessToken);
-  }, []);
-
-  if (isAuthenticated === null || (isAuthenticated && authLoading && !user)) {
+  // Show loading while auth is loading (includes refresh token check)
+  if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-gray-600">Loading...</div>
@@ -26,7 +21,13 @@ export default function ProtectedRoute({ children, adminOnly = false }: Protecte
     );
   }
 
-  if (!isAuthenticated) {
+  // Check if we have tokens (AuthContext will handle refresh if needed)
+  const accessToken = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
+  const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
+  
+  // Only redirect to login if we have neither token AND no user
+  // If we have refresh token, AuthContext will try to refresh
+  if (!accessToken && !refreshToken && !user) {
     return <Navigate to="/login" replace />;
   }
 

@@ -107,56 +107,80 @@ export default function Chart({
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
-    // Create chart
+    // Create chart with modern TradingView-style design
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
       layout: {
-        background: { color: "#ffffff" },
-        textColor: "#333",
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        background: { 
+          type: 'solid',
+          color: "#0a0e27" // Dark background like TradingView
+        },
+        textColor: "#d1d4dc",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        fontSize: 12,
       },
       grid: {
-        vertLines: { color: "#f0f3fa" },
-        horzLines: { color: "#f0f3fa" },
+        vertLines: { 
+          color: "#1e222d",
+          style: 0,
+          visible: true,
+        },
+        horzLines: { 
+          color: "#1e222d",
+          style: 0,
+          visible: true,
+        },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: {
           width: 1,
-          color: "#9B7DFF",
-          style: 3, // Dashed
-          labelBackgroundColor: "#9B7DFF",
+          color: "#758696",
+          style: 0, // Solid
+          labelBackgroundColor: "#131722",
         },
         horzLine: {
           width: 1,
-          color: "#9B7DFF",
-          style: 3, // Dashed
-          labelBackgroundColor: "#9B7DFF",
+          color: "#758696",
+          style: 0, // Solid
+          labelBackgroundColor: "#131722",
         },
       },
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 12,
-        barSpacing: 10,
-        borderColor: "#D1D4DC",
+        barSpacing: 8,
+        borderColor: "#2a2e39",
+        borderVisible: true,
       },
       rightPriceScale: {
-        borderColor: "#D1D4DC",
+        borderColor: "#2a2e39",
+        borderVisible: true,
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.1,
+        },
       },
     });
 
     chartRef.current = chart;
 
-    // Add candlestick series using new API
+    // Add candlestick series with modern TradingView colors
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#26a69a",
-      downColor: "#ef5350",
-      borderVisible: false,
+      upColor: "#26a69a", // Green for bullish
+      downColor: "#ef5350", // Red for bearish
+      borderVisible: true,
+      borderUpColor: "#26a69a",
+      borderDownColor: "#ef5350",
       wickUpColor: "#26a69a",
       wickDownColor: "#ef5350",
+      priceFormat: {
+        type: 'price',
+        precision: 2,
+        minMove: 0.01,
+      },
     }) as ISeriesApi<"Candlestick">;
 
     candlestickSeriesRef.current = candlestickSeries;
@@ -280,82 +304,76 @@ export default function Chart({
   }, [selectedNewsTime]);
 
   return (
-    <div className="w-full h-full flex flex-col relative">
+    <div className="w-full h-full flex flex-col relative bg-[#0a0e27] rounded-lg overflow-hidden">
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
-          <div className="text-gray-600">Loading chart data...</div>
+        <div className="absolute inset-0 flex items-center justify-center bg-[#0a0e27] bg-opacity-90 backdrop-blur-sm z-10">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-4 border-[#26a69a] border-t-transparent rounded-full animate-spin"></div>
+            <div className="text-[#d1d4dc] text-sm font-medium">Loading chart data...</div>
+          </div>
         </div>
       )}
       {error && (
-        <div className="p-4 bg-red-50 text-red-800 rounded mb-4">{error}</div>
+        <div className="absolute top-4 right-4 z-20 p-3 bg-[#ef5350] bg-opacity-90 backdrop-blur-sm text-white rounded-lg shadow-xl border border-[#ef5350] text-sm">
+          {error}
+        </div>
       )}
 
-      {/* TradingView-style Legend */}
-      <div className="absolute top-3 left-3 z-20 bg-white bg-opacity-90 p-2 rounded border border-gray-100 shadow-sm text-xs font-mono pointer-events-none">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="font-bold text-lg text-gray-900">{symbol}</span>
-          <span className="text-gray-500">{interval}</span>
-          <span
-            className={`font-bold ${
-              isConnected ? "text-green-500" : "text-red-500"
-            }`}
-          >
-            •
-          </span>
-        </div>
-        {currentLegendData && (
-          <div className="flex gap-3">
-            <span className="text-gray-600">
-              O:{" "}
+      {/* Modern TradingView-style Legend - OHLC Only */}
+      {currentLegendData && (
+        <div className="absolute top-3 left-3 z-20 bg-[#131722] bg-opacity-95 backdrop-blur-sm px-3 py-2 rounded-lg border border-[#2a2e39] shadow-xl text-xs font-mono pointer-events-none transition-all duration-200">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#758696]">O</span>
               <span
-                className={
+                className={`font-semibold ${
                   currentLegendData.open > currentLegendData.close
-                    ? "text-red-500"
-                    : "text-green-500"
-                }
+                    ? "text-[#ef5350]"
+                    : "text-[#26a69a]"
+                }`}
               >
                 {currentLegendData.open.toFixed(2)}
               </span>
-            </span>
-            <span className="text-gray-600">
-              H:{" "}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#758696]">H</span>
               <span
-                className={
+                className={`font-semibold ${
                   currentLegendData.high > currentLegendData.close
-                    ? "text-red-500"
-                    : "text-green-500"
-                }
+                    ? "text-[#ef5350]"
+                    : "text-[#26a69a]"
+                }`}
               >
                 {currentLegendData.high.toFixed(2)}
               </span>
-            </span>
-            <span className="text-gray-600">
-              L:{" "}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#758696]">L</span>
               <span
-                className={
+                className={`font-semibold ${
                   currentLegendData.low > currentLegendData.close
-                    ? "text-red-500"
-                    : "text-green-500"
-                }
+                    ? "text-[#ef5350]"
+                    : "text-[#26a69a]"
+                }`}
               >
                 {currentLegendData.low.toFixed(2)}
               </span>
-            </span>
-            <span className="text-gray-600">
-              C:{" "}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#758696]">C</span>
               <span
-                className={
+                className={`font-bold ${
                   currentLegendData.close >= currentLegendData.open
-                    ? "text-green-600 font-bold"
-                    : "text-red-600 font-bold"
-                }
+                    ? "text-[#26a69a]"
+                    : "text-[#ef5350]"
+                }`}
               >
                 {currentLegendData.close.toFixed(2)}
               </span>
-            </span>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div ref={chartContainerRef} className="flex-1 w-full" />
     </div>
