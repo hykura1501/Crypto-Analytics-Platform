@@ -6,3 +6,13 @@ google-generativeai
 python-dotenv
 pydantic
 requests
+pandas
+numpy
+scikit-learn
+xgboost
+transformers
+torch
+shap
+langdetect
+underthesea
+937
