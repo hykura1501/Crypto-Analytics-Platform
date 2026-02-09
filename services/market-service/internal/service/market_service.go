@@ -86,6 +86,8 @@ func (s *MarketService) StartRealtimeStream(ctx context.Context) error {
 	go func() {
 		lastLogTime := time.Now()
 		messageCount := 0
+		reconnectBackoff := 5 * time.Second
+		maxBackoff := 5 * time.Minute
 
 		for {
 			select {
@@ -122,19 +124,28 @@ func (s *MarketService) StartRealtimeStream(ctx context.Context) error {
 				topic := fmt.Sprintf("market:%s:%s", price.Symbol, price.Interval)
 				s.wsHub.BroadcastToTopic(topic, price)
 
-				// 3. Save to database (upsert, silent)
+				// 3. Save to database (upsert)
 				go func(p *model.MarketPrice) {
 					if err := s.repo.Create(p); err != nil {
-						// Silently handle, upsert should work
+						log.Printf("❌ DB save error for %s/%s at %v: %v", p.Symbol, p.Interval, p.Time, err)
 					}
 				}(price)
 
 			case err := <-s.binanceWS.GetErrorChannel():
 				if err != nil {
-					log.Printf("WebSocket error: %v. Reconnecting in 15s...", err)
-					time.Sleep(15 * time.Second)
+					log.Printf("WebSocket error: %v. Reconnecting in %v...", err, reconnectBackoff)
+					time.Sleep(reconnectBackoff)
 					if err := s.binanceWS.Connect(); err != nil {
 						log.Printf("Reconnection failed: %v", err)
+						// Increase backoff for next retry
+						reconnectBackoff = reconnectBackoff * 2
+						if reconnectBackoff > maxBackoff {
+							reconnectBackoff = maxBackoff
+						}
+					} else {
+						// Reset backoff on successful reconnection
+						reconnectBackoff = 5 * time.Second
+						log.Println("✅ Successfully reconnected to Binance WebSocket")
 					}
 				}
 			}

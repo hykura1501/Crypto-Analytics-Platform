@@ -28,11 +28,15 @@ class KafkaConfig:
 class APIConfig:
     def __init__(self):
         self.port = int(os.getenv("API_PORT", "9001"))
-        self.jwt_secret = os.getenv("JWT_SECRET", "super-secret-key")
+        self.jwt_secret = os.getenv("JWT_SECRET")
+        if not self.jwt_secret:
+            raise ValueError("❌ Required environment variable JWT_SECRET is not set")
 
 class GeminiConfig:
     def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY", "")
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            raise ValueError("❌ Required environment variable GEMINI_API_KEY is not set")
         self.model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
 class Config:
