@@ -8,7 +8,7 @@ import React, {
 import Cookies from "js-cookie";
 import { apiClient } from "../api/client";
 import { COOKIE_NAMES } from "../config";
-import type { User, UserRole } from "../types";
+import type { User } from "../types";
 
 interface AuthContextType {
   user: User | null;
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         setLoading(true);
         setError(null);
-        const response = await apiClient.refreshToken(refreshToken);
+        await apiClient.refreshToken(refreshToken);
         // Token refreshed, now fetch user
         const me = await apiClient.getMe();
         setUser(me);

@@ -1,34 +1,112 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { type Article } from '../types';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { type Article, type Source } from '../types';
 import { apiClient } from '../api/client';
+import Layout from '../components/Layout';
 
 export default function News() {
-  const navigate = useNavigate();
   const [articles, setArticles] = useState<Article[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | number | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  
+  // Filters
+  const [selectedSource, setSelectedSource] = useState<string>('');
+  const [sortBy, setSortBy] = useState<'published_at' | 'created_at'>('published_at');
+  const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
+  
+  const observerTarget = useRef<HTMLDivElement>(null);
 
+  // Fetch sources for filter
   useEffect(() => {
-    const fetchNews = async () => {
+    const fetchSources = async () => {
       try {
-        setLoading(true);
-        const data = await apiClient.getNews({ limit: 50 });
-        setArticles(data);
-        setError(null);
+        const data = await apiClient.getSources();
+        setSources(data || []);
       } catch (err) {
-        const error = err as { response?: { data?: { message?: string } }; message?: string };
-        setError(error.response?.data?.message || error.message || 'Failed to load news');
-      } finally {
-        setLoading(false);
+        console.error('Error fetching sources:', err);
       }
     };
-
-    fetchNews();
-    // Refresh news every 5 minutes
-    const interval = setInterval(fetchNews, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    fetchSources();
   }, []);
+
+  // Fetch news with filters
+  const fetchNews = useCallback(async (cursor?: string | number, append = false) => {
+    try {
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setArticles([]);
+        setNextCursor(null);
+        setHasMore(true);
+      }
+      setError(null);
+
+      const params: any = {
+        limit: 20,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      };
+
+      if (cursor) {
+        params.cursor = cursor;
+      }
+
+      if (selectedSource) {
+        params.source_id = selectedSource;
+      }
+
+      const response = await apiClient.getNews(params);
+      
+      // Response is always in new format with pagination
+      if (append) {
+        setArticles(prev => [...prev, ...response.articles]);
+      } else {
+        setArticles(response.articles);
+      }
+      setNextCursor(response.next_cursor);
+      setHasMore(response.has_more);
+    } catch (err) {
+      const error = err as { response?: { data?: { message?: string } }; message?: string };
+      setError(error.response?.data?.message || error.message || 'Failed to load news');
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [selectedSource, sortBy, sortOrder]);
+
+  // Initial load and when filters change
+  useEffect(() => {
+    fetchNews();
+  }, [fetchNews]);
+
+  // Infinite scroll observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore && !loading) {
+          if (nextCursor) {
+            fetchNews(nextCursor, true);
+          }
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentTarget = observerTarget.current;
+    if (currentTarget) {
+      observer.observe(currentTarget);
+    }
+
+    return () => {
+      if (currentTarget) {
+        observer.unobserve(currentTarget);
+      }
+    };
+  }, [hasMore, loadingMore, loading, nextCursor, fetchNews]);
 
   const getSentimentColor = (sentimentScore?: number): string => {
     if (sentimentScore === undefined || sentimentScore === null) {
@@ -43,6 +121,7 @@ export default function News() {
   };
 
   const formatTime = (timeString: string): string => {
+    if (!timeString) return '';
     const date = new Date(timeString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -58,31 +137,79 @@ export default function News() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">Crypto News</h1>
-          <button
-            onClick={() => navigate('/')}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </header>
+    <Layout>
+      <div className="flex flex-col h-full overflow-hidden">
+        {/* Filters and Sort */}
+        <div className="bg-[#131722] border-b border-[#2a2e39] px-6 py-4 flex-shrink-0">
+          <div className="container mx-auto flex flex-wrap items-center gap-4">
+            {/* Source Filter */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-[#d1d4dc]">Source:</label>
+              <select
+                value={selectedSource}
+                onChange={(e) => setSelectedSource(e.target.value)}
+                className="px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-lg text-sm text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] hover:bg-[#252936] transition-all cursor-pointer"
+              >
+                <option value="" className="bg-[#1e222d] text-[#d1d4dc]">All Sources</option>
+                {sources.map((source) => (
+                  <option key={source.source_id} value={source.source_id} className="bg-[#1e222d] text-[#d1d4dc]">
+                    {source.source_id}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-      <div className="flex-1 container mx-auto px-4 py-8">
-        {loading && (
-          <div className="text-center text-gray-500">Loading news...</div>
+            {/* Sort By */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-[#d1d4dc]">Sort By:</label>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as 'published_at' | 'created_at')}
+                className="px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-lg text-sm text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] hover:bg-[#252936] transition-all cursor-pointer"
+              >
+                <option value="published_at" className="bg-[#1e222d] text-[#d1d4dc]">Published Date</option>
+                <option value="created_at" className="bg-[#1e222d] text-[#d1d4dc]">Created Date</option>
+              </select>
+            </div>
+
+            {/* Sort Order */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-[#d1d4dc]">Order:</label>
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as 'ASC' | 'DESC')}
+                className="px-3 py-2 bg-[#1e222d] border border-[#2a2e39] rounded-lg text-sm text-[#d1d4dc] focus:outline-none focus:ring-2 focus:ring-[#26a69a] hover:bg-[#252936] transition-all cursor-pointer"
+              >
+                <option value="DESC" className="bg-[#1e222d] text-[#d1d4dc]">Newest First</option>
+                <option value="ASC" className="bg-[#1e222d] text-[#d1d4dc]">Oldest First</option>
+              </select>
+            </div>
+
+            <div className="ml-auto text-sm text-[#758696]">
+              {articles.length} {articles.length === 1 ? 'article' : 'articles'}
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 container mx-auto px-4 py-8 overflow-y-auto">
+        {loading && articles.length === 0 && (
+          <div className="flex items-center justify-center py-20">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-4 border-[#26a69a] border-t-transparent rounded-full animate-spin"></div>
+              <div className="text-[#d1d4dc] text-sm font-medium">Loading news...</div>
+            </div>
+          </div>
         )}
         
         {error && (
-          <div className="bg-red-50 text-red-800 p-4 rounded mb-4">{error}</div>
+          <div className="bg-[#ef5350] bg-opacity-90 backdrop-blur-sm text-white p-4 rounded-lg mb-4 border border-[#ef5350]">
+            {error}
+          </div>
         )}
         
         {!loading && !error && articles.length === 0 && (
-          <div className="text-center text-gray-500">No news available</div>
+          <div className="text-center text-[#758696] py-20">No news available</div>
         )}
         
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -92,10 +219,10 @@ export default function News() {
               href={article.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow border border-gray-200"
+              className="block bg-[#131722] p-6 rounded-lg shadow-xl hover:shadow-2xl transition-all border border-[#2a2e39] hover:border-[#26a69a]/50 group"
             >
               <div className="flex items-start justify-between mb-4">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#1e222d] text-[#d1d4dc] border border-[#2a2e39]">
                   {article.source_id}
                 </span>
                 {article.sentiment_score !== undefined && article.sentiment_score !== null && (
@@ -105,21 +232,45 @@ export default function News() {
                 )}
               </div>
               
-              <h3 className="text-lg font-medium text-gray-900 mb-2 line-clamp-2">
+              <h3 className="text-lg font-semibold text-[#d1d4dc] mb-2 line-clamp-2 group-hover:text-[#26a69a] transition-colors">
                 {article.title}
               </h3>
               
-              <p className="text-gray-500 text-sm mb-4 line-clamp-3">
+              <p className="text-[#758696] text-sm mb-4 line-clamp-3">
                 {article.summary || article.content_text}
               </p>
               
-              <div className="flex items-center justify-between text-xs text-gray-400 mt-auto">
-                <span>{article.published_at ? formatTime(article.published_at) : ''}</span>
+              <div className="flex items-center justify-between text-xs text-[#758696] mt-auto pt-4 border-t border-[#2a2e39]">
+                <span>{article.published_at ? formatTime(article.published_at) : 'Unknown date'}</span>
+                {article.language && (
+                  <span className="px-2 py-0.5 bg-[#1e222d] rounded text-[#758696] uppercase">
+                    {article.language}
+                  </span>
+                )}
               </div>
             </a>
           ))}
         </div>
+
+        {/* Infinite scroll trigger */}
+        {hasMore && (
+          <div ref={observerTarget} className="py-8 flex justify-center">
+            {loadingMore && (
+              <div className="flex items-center gap-2 text-[#758696]">
+                <div className="w-5 h-5 border-2 border-[#26a69a] border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-sm">Loading more...</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!hasMore && articles.length > 0 && (
+          <div className="text-center text-[#758696] py-8 text-sm">
+            No more articles to load
+          </div>
+        )}
+        </div>
       </div>
-    </div>
+    </Layout>
   );
 }
