@@ -74,11 +74,27 @@ func (c *Client) GetKlines(symbol, interval string, limit int, startTime, endTim
 
 func parseKline(symbol, interval string, kline []interface{}) (*model.MarketPrice, error) {
 	openTime := int64(kline[0].(float64))
-	open, _ := strconv.ParseFloat(kline[1].(string), 64)
-	high, _ := strconv.ParseFloat(kline[2].(string), 64)
-	low, _ := strconv.ParseFloat(kline[3].(string), 64)
-	close, _ := strconv.ParseFloat(kline[4].(string), 64)
-	volume, _ := strconv.ParseFloat(kline[5].(string), 64)
+
+	open, err := strconv.ParseFloat(kline[1].(string), 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse open price: %w", err)
+	}
+	high, err := strconv.ParseFloat(kline[2].(string), 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse high price: %w", err)
+	}
+	low, err := strconv.ParseFloat(kline[3].(string), 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse low price: %w", err)
+	}
+	closePrice, err := strconv.ParseFloat(kline[4].(string), 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse close price: %w", err)
+	}
+	volume, err := strconv.ParseFloat(kline[5].(string), 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse volume: %w", err)
+	}
 
 	return &model.MarketPrice{
 		Symbol:   symbol,
@@ -87,7 +103,7 @@ func parseKline(symbol, interval string, kline []interface{}) (*model.MarketPric
 		Open:     open,
 		High:     high,
 		Low:      low,
-		Close:    close,
+		Close:    closePrice,
 		Volume:   volume,
 	}, nil
 }

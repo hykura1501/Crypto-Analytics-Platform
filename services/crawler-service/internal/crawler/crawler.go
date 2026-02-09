@@ -121,3 +121,18 @@ func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
 	log.Printf("🎉 Crawling completed. Total saved: %d", finalCount)
 	return finalCount, nil
 }
+
+// nullString converts empty string to sql.NullString
+func nullString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{Valid: false}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

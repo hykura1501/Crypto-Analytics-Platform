@@ -36,8 +36,15 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
   const wsRef = useRef<WebSocket | null>(null);
   const subscriptionsRef = useRef<Set<string>>(new Set());
   const messagesRef = useRef<Map<string, MarketPrice>>(new Map());
+  const retryCountRef = useRef(0);
+
+  const MAX_RETRIES = 10;
+  const BASE_DELAY = 1000; // 1 second
+  const MAX_DELAY = 30000; // 30 seconds
 
   useEffect(() => {
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
     const connect = () => {
       const wsUrl = `${WS_BASE_URL}/ws/prices`;
       const ws = new WebSocket(wsUrl);
@@ -45,6 +52,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
       ws.onopen = () => {
         console.log("WebSocket connected");
         setIsConnected(true);
+        retryCountRef.current = 0; // Reset on successful connection
 
         // Resubscribe to existing topics on reconnection
         if (subscriptionsRef.current.size > 0) {
@@ -73,8 +81,16 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
       ws.onclose = () => {
         console.log("WebSocket disconnected");
         setIsConnected(false);
-        // Attempt to reconnect after 5 seconds
-        setTimeout(connect, 5000);
+
+        if (retryCountRef.current >= MAX_RETRIES) {
+          console.error(`WebSocket: max retries (${MAX_RETRIES}) reached, giving up`);
+          return;
+        }
+
+        const delay = Math.min(BASE_DELAY * Math.pow(2, retryCountRef.current), MAX_DELAY);
+        retryCountRef.current++;
+        console.log(`WebSocket: reconnecting in ${delay}ms (attempt ${retryCountRef.current}/${MAX_RETRIES})`);
+        reconnectTimer = setTimeout(connect, delay);
       };
 
       ws.onerror = (error) => {
@@ -88,6 +104,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     connect();
 
     return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (wsRef.current) {
         wsRef.current.close();
       }

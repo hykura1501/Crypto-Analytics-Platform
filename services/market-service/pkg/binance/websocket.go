@@ -139,11 +139,26 @@ func (ws *WebSocketClient) readMessages() {
 }
 
 func (ws *WebSocketClient) parseWSMessage(msg *model.BinanceWSMessage) (*model.MarketPrice, error) {
-	open, _ := strconv.ParseFloat(msg.Kline.Open, 64)
-	high, _ := strconv.ParseFloat(msg.Kline.High, 64)
-	low, _ := strconv.ParseFloat(msg.Kline.Low, 64)
-	close, _ := strconv.ParseFloat(msg.Kline.Close, 64)
-	volume, _ := strconv.ParseFloat(msg.Kline.Volume, 64)
+	open, err := strconv.ParseFloat(msg.Kline.Open, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse open price: %w", err)
+	}
+	high, err := strconv.ParseFloat(msg.Kline.High, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse high price: %w", err)
+	}
+	low, err := strconv.ParseFloat(msg.Kline.Low, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse low price: %w", err)
+	}
+	closePrice, err := strconv.ParseFloat(msg.Kline.Close, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse close price: %w", err)
+	}
+	volume, err := strconv.ParseFloat(msg.Kline.Volume, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse volume: %w", err)
+	}
 
 	return &model.MarketPrice{
 		Symbol:   msg.Symbol,
@@ -152,7 +167,7 @@ func (ws *WebSocketClient) parseWSMessage(msg *model.BinanceWSMessage) (*model.M
 		Open:     open,
 		High:     high,
 		Low:      low,
-		Close:    close,
+		Close:    closePrice,
 		Volume:   volume,
 	}, nil
 }

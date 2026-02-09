@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import type { CreateSourceRequest, UpdateSourceRequest, Source } from '../types';
 import Layout from '../components/Layout';
+import { extractErrorMessage } from '../utils/errors';
 
 export default function SourceForm() {
   const navigate = useNavigate();
@@ -48,8 +49,7 @@ export default function SourceForm() {
         tags_selector: data.tags_selector || '',
       });
     } catch (err) {
-      const error = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(error.response?.data?.message || error.message || 'Failed to load source');
+      setError(extractErrorMessage(err, 'Failed to load source'));
     } finally {
       setLoading(false);
     }
@@ -82,8 +82,7 @@ export default function SourceForm() {
       }
       navigate('/sources');
     } catch (err) {
-      const error = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(error.response?.data?.message || error.message || 'Failed to save source');
+      setError(extractErrorMessage(err, 'Failed to save source'));
     } finally {
       setLoading(false);
     }

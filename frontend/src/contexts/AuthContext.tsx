@@ -78,18 +78,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshUser]);
 
   useEffect(() => {
-    const checkToken = () => {
+    const handleAuthChange = () => {
       const accessToken = Cookies.get(COOKIE_NAMES.ACCESS_TOKEN);
       const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
-      
-      // Only clear user if we have neither token
-      // If refresh token exists, interceptor will handle refresh
+
       if (!accessToken && !refreshToken && user) {
         setUser(null);
       }
     };
-    const t = setInterval(checkToken, 2000);
-    return () => clearInterval(t);
+
+    // Listen for custom auth-state-changed events (fired from API client on login/logout)
+    window.addEventListener("auth-state-changed", handleAuthChange);
+
+    // Also listen for storage events from other tabs
+    window.addEventListener("storage", handleAuthChange);
+
+    // Fallback: check every 30s instead of 2s (primarily for cookie expiry detection)
+    const t = setInterval(handleAuthChange, 30_000);
+
+    return () => {
+      window.removeEventListener("auth-state-changed", handleAuthChange);
+      window.removeEventListener("storage", handleAuthChange);
+      clearInterval(t);
+    };
   }, [user]);
 
   const role = user?.role ?? "NORMAL";

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -76,7 +77,7 @@ func Load() *Config {
 			Port: getEnv("SERVER_PORT", "8083"),
 		},
 		JWT: JWTConfig{
-			Secret: getEnv("JWT_SECRET", "super-secret-key"),
+			Secret: requireEnv("JWT_SECRET"),
 		},
 	}
 }
@@ -95,6 +96,14 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func requireEnv(key string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		log.Fatalf("❌ Required environment variable %s is not set", key)
+	}
+	return value
 }
 
 func getEnvInt(key string, defaultValue int) int {
