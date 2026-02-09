@@ -20,7 +20,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	// Kết nối DB
+	// Kết nối DB (sẽ tự động chạy migrations)
 	database, err := db.Connect(&cfg.Database)
 	if err != nil {
 		log.Fatalf("failed to connect database: %v", err)
