@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -13,9 +14,25 @@ import (
 // JWTAuth middleware to validate JWT tokens
 func JWTAuth(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip JWT validation for login and register endpoints
+		// Skip JWT validation for login, register endpoints, and WebSocket connections
 		path := c.Request.URL.Path
-		if strings.HasPrefix(path, "/auth/login") || strings.HasPrefix(path, "/auth/register") {
+		upgradeHeader := c.GetHeader("Upgrade")
+		connectionHeader := c.GetHeader("Connection")
+
+		// Debug log
+		log.Printf("JWT Middleware: path=%s, upgrade=%s, connection=%s", path, upgradeHeader, connectionHeader)
+
+		// Check for WebSocket upgrade header or /ws/ path
+		// WebSocket requests have "Upgrade: websocket" header
+		isWebSocket := strings.HasPrefix(path, "/ws/") ||
+			upgradeHeader == "websocket" ||
+			(strings.ToLower(connectionHeader) == "upgrade" && upgradeHeader != "")
+
+		if strings.HasPrefix(path, "/auth/login") ||
+			strings.HasPrefix(path, "/auth/register") ||
+			strings.HasPrefix(path, "/health") ||
+			isWebSocket {
+			log.Printf("JWT Middleware: Skipping auth for path=%s (isWebSocket=%v)", path, isWebSocket)
 			c.Next()
 			return
 		}

@@ -113,7 +113,7 @@ func (s *MarketService) StartRealtimeStream(ctx context.Context) error {
 					if err := s.kafkaProducer.Publish(ctx, p.Symbol, p); err != nil {
 						log.Printf("❌ Kafka error: %v", err)
 					} else {
-						log.Printf("✅ Kafka: %s %.2f", p.Symbol, p.Close)
+						// log.Printf("✅ Kafka: %s %.2f", p.Symbol, p.Close)
 					}
 				}(price)
 
