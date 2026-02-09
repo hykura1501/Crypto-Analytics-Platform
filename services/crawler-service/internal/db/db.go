@@ -40,10 +40,10 @@ func RunMigrations(db *sql.DB) error {
 		title_tag VARCHAR(100),
 		link_tag VARCHAR(100),
 		pub_date_tag VARCHAR(100),
-		summary_selector VARCHAR(100),
-		content_selector VARCHAR(100),
-		author_selector VARCHAR(100),
-		tags_selector VARCHAR(100),
+		summary_selector TEXT,
+		content_selector TEXT,
+		author_selector TEXT,
+		tags_selector TEXT,
 		created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 	);

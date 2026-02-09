@@ -19,6 +19,7 @@ func NewProducer(broker, topic string) *Producer {
 	config.Producer.Return.Successes = true
 	config.Producer.RequiredAcks = sarama.WaitForAll
 	config.Producer.Retry.Max = 5
+	config.Producer.MaxMessageBytes = 5000000 // 5MB
 
 	producer, err := sarama.NewSyncProducer([]string{broker}, config)
 	if err != nil {
@@ -60,6 +61,30 @@ func (p *Producer) PublishNews(ctx context.Context, newsID int64, title, content
 	}
 
 	log.Printf("Published news to Kafka [Sarama]: %d %s (partition: %d, offset: %d)", newsID, title, partition, offset)
+	return nil
+}
+
+func (p *Producer) SendMessage(topic string, payload interface{}) error {
+	if p == nil || p.producer == nil {
+		return fmt.Errorf("producer is nil")
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	msg := &sarama.ProducerMessage{
+		Topic: topic,
+		Value: sarama.ByteEncoder(data),
+	}
+
+	partition, offset, err := p.producer.SendMessage(msg)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("📤 Sent message to Kafka topic %s (partition: %d, offset: %d)", topic, partition, offset)
 	return nil
 }
 

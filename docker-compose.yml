@@ -17,6 +17,7 @@ services:
       timeout: 5s
       retries: 5
 
+<<<<<<< HEAD
   backend:
     build:
       context: ./backend
@@ -60,6 +61,142 @@ services:
     volumes:
       - ./services/crawler:/app
     restart: unless-stopped
+=======
+  # Redis Cache
+  # redis:
+  #   image: redis:alpine
+  #   container_name: crypto_redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - crypto-network
+  #   healthcheck:
+  #     test: [ "CMD", "redis-cli", "ping" ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # Kafka Message Broker (KRaft mode)
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: crypto_kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:9092,CONTROLLER://localhost:9093,PLAINTEXT_HOST://0.0.0.0:29092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_MESSAGE_MAX_BYTES: 5242880
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 5242880
+    ports:
+      - "29092:29092"
+    networks:
+      - crypto-network
+    healthcheck:
+      test: [ "CMD-SHELL", "nc -z localhost 9092 || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Kafka UI
+  # kafka-ui:
+  #   image: provectuslabs/kafka-ui:latest
+  #   container_name: crypto_kafka_ui
+  #   ports:
+  #     - "8090:8080"
+  #   environment:
+  #     KAFKA_CLUSTERS_0_NAME: local
+  #     KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+  #   networks:
+  #     - crypto-network
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # Traefik Reverse Proxy (New API Gateway)
+  traefik:
+    image: traefik:v3.6.5
+    container_name: crypto_traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      # CORS configuration
+      - "--entrypoints.web.http.middlewares=cors-headers"
+    ports:
+      - "5000:80" # API Entrypoint
+      - "8080:8080" # Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - crypto-network
+    labels:
+      - "traefik.enable=true"
+      # Global CORS middleware definition
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolallowmethods=GET,OPTIONS,PUT,POST,DELETE,PATCH"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolalloworiginlist=*"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolmaxage=100"
+      - "traefik.http.middlewares.cors-headers.headers.addvaryheader=true"
+
+  # Auth Service
+  # auth-service:
+  #   build:
+  #     context: ./services/auth-service
+  #     dockerfile: Dockerfile
+  #   container_name: crypto_auth_service
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - crypto-network
+  #   restart: unless-stopped
+  #   labels:
+  #     - "traefik.enable=true"
+  #     # Route: /api/v1/auth/*
+  #     - "traefik.http.routers.auth.rule=PathPrefix(`/api/v1/auth`)"
+  #     - "traefik.http.services.auth.loadbalancer.server.port=8081"
+  #     - "traefik.http.routers.auth.middlewares=cors-headers"
+
+  # # Market Service
+  # market-service:
+  #   build:
+  #     context: ./services/market-service
+  #     dockerfile: Dockerfile
+  #   container_name: crypto_market_service
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     kafka:
+  #       condition: service_healthy
+  #   networks:
+  #     - crypto-network
+  #   restart: unless-stopped
+  #   labels:
+  #     - "traefik.enable=true"
+  #     # Route: /api/v1/market/*
+  #     - "traefik.http.routers.market.rule=PathPrefix(`/api/v1/market`)"
+  #     - "traefik.http.services.market.loadbalancer.server.port=8082"
+  #     - "traefik.http.routers.market.middlewares=cors-headers"
+  #     # Route: /ws/* (WebSocket)
+  #     - "traefik.http.routers.market-ws.rule=PathPrefix(`/ws`)"
+  #     - "traefik.http.routers.market-ws.service=market"
+  #     - "traefik.http.routers.market-ws.middlewares=cors-headers"
+>>>>>>> bf6a22a (refactor: Remove outdated README and STRUCTURE files; update docker-compose for Kafka settings; enhance AI service with CSS selector analysis and related handlers; improve crawler service for RSS and HTML processing.)
 
   ai-service:
     build:
@@ -79,6 +216,8 @@ services:
     restart: unless-stopped
     ports:
       - "9001:9001"
+    volumes:
+      - ./logs/ai-prompts:/tmp/ai-prompts
     labels:
       - "traefik.enable=true"
       # Route: /api/v1/ai/*
