@@ -121,3 +121,10 @@ func (s *Service) CrawlOnce(ctx context.Context) (int, error) {
 	log.Printf("🎉 Crawling completed. Total saved: %d", finalCount)
 	return finalCount, nil
 }
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
