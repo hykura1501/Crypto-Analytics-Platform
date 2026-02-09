@@ -9,6 +9,7 @@ export default function Sources() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSources();
@@ -43,6 +44,23 @@ export default function Sources() {
       alert(error.response?.data?.message || error.message || 'Failed to delete source');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleAnalyze = async (sourceId: string) => {
+    try {
+      setAnalyzingId(sourceId);
+      await apiClient.analyzeSource(sourceId);
+      alert('Analysis triggered successfully! RSS and CSS selector analysis will be processed in the background.');
+      // Refresh sources to get updated selectors
+      setTimeout(() => {
+        fetchSources();
+      }, 3000);
+    } catch (err) {
+      const error = err as { response?: { data?: { message?: string } }; message?: string };
+      alert(error.response?.data?.message || error.message || 'Failed to trigger analysis');
+    } finally {
+      setAnalyzingId(null);
     }
   };
 
@@ -174,6 +192,24 @@ export default function Sources() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleAnalyze(source.source_id)}
+                          disabled={analyzingId === source.source_id}
+                          className="px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          title="Analyze RSS and CSS selectors"
+                        >
+                          {analyzingId === source.source_id ? (
+                            <span className="flex items-center gap-1">
+                              <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Analyzing...
+                            </span>
+                          ) : (
+                            '🔍 Analyze'
+                          )}
+                        </button>
                         <button
                           onClick={() => navigate(`/sources/${source.source_id}/edit`)}
                           className="text-indigo-600 hover:text-indigo-900"
