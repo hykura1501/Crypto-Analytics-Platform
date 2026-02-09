@@ -1,8 +1,18 @@
-import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
-// @ts-expect-error - js-cookie uses CommonJS export which works at runtime
-import Cookies from 'js-cookie';
-import { API_BASE_URL, COOKIE_NAMES } from '../config';
-import { type ApiSuccessResponse, type Article, type AuthResponse, type LoginRequest, type MarketPrice, type RefreshTokenRequest } from '../types';
+import axios, {
+  type AxiosInstance,
+  type InternalAxiosRequestConfig,
+} from "axios";
+import Cookies from "js-cookie";
+import { API_BASE_URL, API_VERSION_PREFIX, COOKIE_NAMES } from "../config";
+import type {
+  ApiSuccessResponse,
+  Article,
+  AuthResponse,
+  LoginRequest,
+  MarketPrice,
+  RefreshTokenRequest,
+  RegisterRequest,
+} from "../types";
 
 class ApiClient {
   private client: AxiosInstance;
@@ -11,10 +21,10 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: API_BASE_URL,
+      baseURL: `${API_BASE_URL}${API_VERSION_PREFIX}`,
       withCredentials: true,
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
     });
 
@@ -56,7 +66,7 @@ class ApiClient {
           try {
             const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
             if (!refreshToken) {
-              throw new Error('No refresh token available');
+              throw new Error("No refresh token available");
             }
 
             const response = await this.refreshToken(refreshToken);
@@ -80,7 +90,7 @@ class ApiClient {
             this.refreshSubscribers = [];
             Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
             Cookies.remove(COOKIE_NAMES.REFRESH_TOKEN);
-            window.location.href = '/login';
+            window.location.href = "/login";
             return Promise.reject(refreshError);
           } finally {
             this.isRefreshing = false;
@@ -93,12 +103,12 @@ class ApiClient {
   }
 
   // Auth endpoints
-  async login(credentials: LoginRequest): Promise<AuthResponse> {
+  async register(credentials: RegisterRequest): Promise<AuthResponse> {
     const response = await this.client.post<AuthResponse>(
-      '/auth/login',
+      "/auth/register",
       credentials
     );
-    
+
     // Store tokens in cookies (backend should set httpOnly cookies, but we also set them client-side)
     if (response.data) {
       const authData = response.data;
@@ -111,16 +121,40 @@ class ApiClient {
         httpOnly: false,
       });
     }
-    
+
     return response.data;
   }
 
-  async refreshToken(refreshToken: string): Promise<ApiSuccessResponse<AuthResponse>> {
+  async login(credentials: LoginRequest): Promise<AuthResponse> {
+    const response = await this.client.post<AuthResponse>(
+      "/auth/login",
+      credentials
+    );
+
+    // Store tokens in cookies (backend should set httpOnly cookies, but we also set them client-side)
+    if (response.data) {
+      const authData = response.data;
+      Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, authData.access_token, {
+        expires: new Date(Date.now() + authData.expires_in * 1000),
+        httpOnly: false,
+      });
+      Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, authData.refresh_token, {
+        expires: 7, // 7 days
+        httpOnly: false,
+      });
+    }
+
+    return response.data;
+  }
+
+  async refreshToken(
+    refreshToken: string
+  ): Promise<ApiSuccessResponse<AuthResponse>> {
     const response = await this.client.post<ApiSuccessResponse<AuthResponse>>(
-      '/auth/refresh',
+      "/auth/refresh",
       { refresh_token: refreshToken } as RefreshTokenRequest
     );
-    
+
     if (response.data.data) {
       const authData = response.data.data as unknown as AuthResponse;
       Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, authData.access_token, {
@@ -128,7 +162,7 @@ class ApiClient {
         httpOnly: false,
       });
     }
-    
+
     return response.data;
   }
 
@@ -136,9 +170,9 @@ class ApiClient {
     const refreshToken = Cookies.get(COOKIE_NAMES.REFRESH_TOKEN);
     if (refreshToken) {
       try {
-        await this.client.post('/auth/logout', { refresh_token: refreshToken });
+        await this.client.post("/auth/logout", { refresh_token: refreshToken });
       } catch (error) {
-        console.error('Logout error:', error);
+        console.error("Logout error:", error);
       }
     }
     Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
@@ -154,7 +188,7 @@ class ApiClient {
     to?: number;
   }): Promise<ApiSuccessResponse<MarketPrice[]>> {
     const response = await this.client.get<ApiSuccessResponse<MarketPrice[]>>(
-      '/market/api/v1/market/history',
+      "/market/history",
       { params }
     );
     return response.data;
@@ -168,10 +202,9 @@ class ApiClient {
     event_type?: string;
     language?: string;
   }): Promise<Article[]> {
-    const response = await this.client.get<Article[]>(
-      '/news/articles/',
-      { params }
-    );
+    const response = await this.client.get<Article[]>("/news/articles", {
+      params,
+    });
     return response.data;
   }
 
@@ -181,4 +214,3 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
-
