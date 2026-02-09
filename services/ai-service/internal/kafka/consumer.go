@@ -100,7 +100,6 @@ func NewConsumer(cfg *config.Config) (*Consumer, error) {
 func (c *Consumer) ReadMessage(ctx context.Context) (*Message, error) {
 	select {
 	case msg := <-c.msgChan:
-		log.Printf("Read news message: %s %s", msg.Topic, msg.Value)
 		return msg, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()

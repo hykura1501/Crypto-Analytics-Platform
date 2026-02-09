@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/crypto-platform/ai-service/internal/causal"
 	"github.com/crypto-platform/ai-service/internal/sentiment"
 )
 
@@ -63,14 +62,12 @@ func (h *NewsHandler) Handle(ctx context.Context, msgValue []byte) {
 	// Get article details for causal analysis
 	var article struct {
 		ID          int
-		Entities    sql.NullString
 		PublishedAt sql.NullTime
 	}
 
-	query = `SELECT id, entities, published_at FROM articles WHERE id = $1`
+	query = `SELECT id, published_at FROM articles WHERE id = $1`
 	err = h.DB.QueryRow(query, msg.NewsID).Scan(
 		&article.ID,
-		&article.Entities,
 		&article.PublishedAt,
 	)
 
@@ -83,39 +80,7 @@ func (h *NewsHandler) Handle(ctx context.Context, msgValue []byte) {
 		return
 	}
 
-	// Causal analysis
-	if article.Entities.Valid && article.Entities.String != "" && article.PublishedAt.Valid {
-		var entities map[string]interface{}
-		if err := json.Unmarshal([]byte(article.Entities.String), &entities); err == nil {
-			symbols := causal.ExtractSymbolsFromEntities(entities)
-
-			for _, symbol := range symbols {
-				causalResult, err := causal.AlignNewsWithPrice(
-					h.DB,
-					msg.NewsID,
-					msg.Title,
-					article.PublishedAt.Time,
-					symbol,
-				)
-
-				if err != nil {
-					log.Printf("Error in causal analysis: %v", err)
-					continue
-				}
-
-				if causalResult != nil {
-					log.Printf(
-						"📈 %s: %.2f → %.2f (%.2f%%, %s)",
-						causalResult.Symbol,
-						causalResult.PriceBefore,
-						causalResult.PriceAfter,
-						causalResult.ChangePct,
-						causalResult.Direction,
-					)
-				}
-			}
-		}
-	}
+	// Causal analysis skipped: no entities column in articles table.
 }
 
 func truncate(s string, max int) string {

@@ -6,6 +6,8 @@ import (
 	"log"
 	"time"
 
+	"regexp"
+
 	"github.com/joho/godotenv"
 
 	"github.com/crypto-platform/crawler-service/config"
