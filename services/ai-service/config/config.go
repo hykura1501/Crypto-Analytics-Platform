@@ -7,6 +7,7 @@ import (
 type Config struct {
 	Database DatabaseConfig
 	Kafka    KafkaConfig
+	API      APIConfig
 }
 
 type DatabaseConfig struct {
@@ -18,10 +19,26 @@ type DatabaseConfig struct {
 	SSLMode  string
 }
 
+const (
+	KafkaTopicNewsNewArticle          = "news_new_article"
+	KafkaTopicNewsAnalyzeRssStructure = "news_analyze_rss_structure"
+	KafkaTopicNewsAnalyzeCssSelector  = "news_analyze_css_selector"
+)
+
+var topics = []string{
+	KafkaTopicNewsNewArticle,
+	KafkaTopicNewsAnalyzeRssStructure,
+	KafkaTopicNewsAnalyzeCssSelector,
+}
+
 type KafkaConfig struct {
 	Broker  string
-	Topic   string
+	Topics  []string
 	GroupID string
+}
+
+type APIConfig struct {
+	Port string
 }
 
 func Load() *Config {
@@ -34,9 +51,12 @@ func Load() *Config {
 			DBName:   getEnv("DB_NAME", "crypto_db"),
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
+		API: APIConfig{
+			Port: getEnv("API_PORT", "8080"),
+		},
 		Kafka: KafkaConfig{
 			Broker:  getEnv("KAFKA_BROKER", "kafka:9092"),
-			Topic:   getEnv("KAFKA_TOPIC", "news_new_article"),
+			Topics:  topics,
 			GroupID: getEnv("KAFKA_GROUP_ID", "ai-service-group-v2"),
 		},
 	}
