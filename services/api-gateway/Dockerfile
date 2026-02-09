@@ -23,6 +23,9 @@ WORKDIR /root/
 # Copy binary from builder
 COPY --from=builder /app/main .
 
+# Copy environment file
+COPY .env .env
+
 EXPOSE 8080
 
 CMD ["./main"]
