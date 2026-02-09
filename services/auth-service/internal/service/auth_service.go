@@ -134,11 +134,23 @@ func (s *authService) RefreshToken(refreshToken string) (*model.AuthResponse, er
 		return nil, errors.New("user account is deactivated")
 	}
 
-	// Delete old refresh token
-	s.refreshTokenRepo.DeleteByToken(refreshToken)
+	// Change: Do NOT delete old refresh token (disable Token Rotation) to prevent race conditions
+	// s.refreshTokenRepo.DeleteByToken(refreshToken)
 
-	// Generate new tokens
-	return s.generateTokens(user)
+	// Generate only new Access Token
+	accessToken, err := s.jwtManager.GenerateAccessToken(user.ID, user.Email, user.Role)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return new Access Token but keep existing Refresh Token
+	return &model.AuthResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken, // Reuse existing token
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(s.jwtManager.GetAccessExpiry().Seconds()),
+		User:         user,
+	}, nil
 }
 
 func (s *authService) ValidateToken(token string) (*model.User, error) {
