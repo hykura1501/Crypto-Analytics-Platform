@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/crypto-platform/auth-service/internal/middleware"
 	"github.com/crypto-platform/auth-service/internal/model"
@@ -233,4 +234,64 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, user)
+}
+
+// ListUsers returns all users (ADMIN only)
+func (h *AuthHandler) ListUsers(c *gin.Context) {
+	users, err := h.authService.ListUsers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+			Error:   "Failed to list users",
+			Message: err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, model.SuccessResponse{
+		Success: true,
+		Data:    users,
+	})
+}
+
+// UpdateUserRole updates a user's role to NORMAL or VIP (ADMIN only)
+func (h *AuthHandler) UpdateUserRole(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{
+			Error:   "Invalid user ID",
+			Message: "user id must be a positive integer",
+		})
+		return
+	}
+
+	var req model.UpdateRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{
+			Error:   "Invalid request",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	user, err := h.authService.UpdateUserRole(uint(id), req.Role)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			c.JSON(http.StatusNotFound, model.ErrorResponse{
+				Error:   "User not found",
+				Message: err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{
+			Error:   "Update failed",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, model.SuccessResponse{
+		Success: true,
+		Message: "Role updated successfully",
+		Data:    user,
+	})
 }

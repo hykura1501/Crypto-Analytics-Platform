@@ -1,7 +1,9 @@
 fastapi
 uvicorn
+PyJWT
 confluent-kafka
 psycopg2-binary
+sqlalchemy
 google-generativeai
 python-dotenv
 pydantic

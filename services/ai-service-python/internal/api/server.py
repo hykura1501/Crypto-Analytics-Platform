@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from config import config
 from internal.handler.rss_handler import RssHandler
@@ -6,6 +6,7 @@ from internal.handler.selector_handler import SelectorHandler
 from internal.prediction import PredictionPipeline
 from internal.sentiment.sentiment import Analyzer
 from internal.db.database import db
+from internal.auth_jwt import verify_prediction_access
 
 class RssAnalysisRequest(BaseModel):
     xml_string: str
@@ -64,7 +65,7 @@ class Server:
             }
         
         @self.app.post("/api/v1/ai/prediction/train")
-        async def train_model(req: TrainRequest):
+        async def train_model(req: TrainRequest, _=Depends(verify_prediction_access)):
             try:
                 metrics = self.prediction.train(
                     symbol=req.symbol,
@@ -76,7 +77,7 @@ class Server:
                 raise HTTPException(status_code=500, detail=str(e))
         
         @self.app.get("/api/v1/ai/prediction/predict/{symbol}/{horizon_hours}")
-        async def predict(symbol: str, horizon_hours: int):
+        async def predict(symbol: str, horizon_hours: int, _=Depends(verify_prediction_access)):
             try:
                 result = self.prediction.predict(symbol=symbol, horizon_hours=horizon_hours)
                 return {

@@ -10,13 +10,16 @@ import type {
   AuthResponse,
   LoginRequest,
   MarketPrice,
+  PredictionRequest,
+  PredictionResponse,
+  PredictionResult,
   RefreshTokenRequest,
   RegisterRequest,
   Source,
   CreateSourceRequest,
   UpdateSourceRequest,
-  PredictionRequest,
-  PredictionResponse,
+  User,
+  UserRole,
 } from "../types";
 
 class ApiClient {
@@ -75,7 +78,7 @@ class ApiClient {
             }
 
             const response = await this.refreshToken(refreshToken);
-            const { access_token } = response.data;
+            const { access_token } = response;
 
             // Update cookie
             Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, access_token, {
@@ -154,18 +157,24 @@ class ApiClient {
 
   async refreshToken(
     refreshToken: string
-  ): Promise<ApiSuccessResponse<AuthResponse>> {
-    const response = await this.client.post<ApiSuccessResponse<AuthResponse>>(
+  ): Promise<AuthResponse> {
+    const response = await this.client.post<AuthResponse>(
       "/auth/refresh",
       { refresh_token: refreshToken } as RefreshTokenRequest
     );
 
-    if (response.data.data) {
-      const authData = response.data.data as unknown as AuthResponse;
+    if (response.data) {
+      const authData = response.data;
       Cookies.set(COOKIE_NAMES.ACCESS_TOKEN, authData.access_token, {
         expires: new Date(Date.now() + authData.expires_in * 1000),
         httpOnly: false,
       });
+      if (authData.refresh_token) {
+        Cookies.set(COOKIE_NAMES.REFRESH_TOKEN, authData.refresh_token, {
+          expires: 7, // 7 days
+          httpOnly: false,
+        });
+      }
     }
 
     return response.data;
@@ -182,6 +191,24 @@ class ApiClient {
     }
     Cookies.remove(COOKIE_NAMES.ACCESS_TOKEN);
     Cookies.remove(COOKIE_NAMES.REFRESH_TOKEN);
+  }
+
+  async getMe(): Promise<User> {
+    const response = await this.client.get<User>("/auth/me");
+    return response.data;
+  }
+
+  async getUsers(): Promise<User[]> {
+    const response = await this.client.get<ApiSuccessResponse<User[]>>("/auth/users");
+    return Array.isArray(response.data.data) ? response.data.data : [];
+  }
+
+  async updateUserRole(userId: number, role: UserRole): Promise<User> {
+    const response = await this.client.patch<ApiSuccessResponse<User>>(
+      `/auth/users/${userId}/role`,
+      { role }
+    );
+    return response.data.data;
   }
 
   // Market endpoints

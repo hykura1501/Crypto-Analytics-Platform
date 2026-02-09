@@ -22,6 +22,8 @@ type AuthService interface {
 	RefreshToken(refreshToken string) (*model.AuthResponse, error)
 	ValidateToken(token string) (*model.User, error)
 	Logout(refreshToken string) error
+	ListUsers() ([]*model.User, error)
+	UpdateUserRole(userID uint, role string) (*model.User, error)
 }
 
 type authService struct {
@@ -61,6 +63,7 @@ func (s *authService) Register(req *model.RegisterRequest) (*model.User, error) 
 		PasswordHash: hashedPassword,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
+		Role:         model.RoleNormal,
 		IsActive:     true,
 	}
 
@@ -150,15 +153,44 @@ func (s *authService) Logout(refreshToken string) error {
 	return s.refreshTokenRepo.DeleteByToken(refreshToken)
 }
 
+func (s *authService) ListUsers() ([]*model.User, error) {
+	return s.userRepo.FindAll()
+}
+
+func (s *authService) UpdateUserRole(userID uint, role string) (*model.User, error) {
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	if user.Role == model.RoleAdmin {
+		return nil, errors.New("cannot change role of admin user")
+	}
+	if role != model.RoleNormal && role != model.RoleVIP {
+		return nil, errors.New("role must be NORMAL or VIP")
+	}
+	user.Role = role
+	if err := s.userRepo.Update(user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func (s *authService) generateTokens(user *model.User) (*model.AuthResponse, error) {
+	role := user.Role
+	if role == "" {
+		role = model.RoleNormal
+	}
 	// Generate access token
-	accessToken, err := s.jwtManager.GenerateAccessToken(user.ID, user.Email)
+	accessToken, err := s.jwtManager.GenerateAccessToken(user.ID, user.Email, role)
 	if err != nil {
 		return nil, err
 	}
 
 	// Generate refresh token
-	refreshToken, err := s.jwtManager.GenerateRefreshToken(user.ID, user.Email)
+	refreshToken, err := s.jwtManager.GenerateRefreshToken(user.ID, user.Email, role)
 	if err != nil {
 		return nil, err
 	}
